@@ -1,0 +1,17 @@
+{
+  "_comment": "AgentGuard M0 spike — drop this into .claude/settings.json of a TEST project (NOT this repo while Claude Code is working here). The PreToolUse hook intercepts every matched tool call and routes it through hook.mjs. 'timeout' is in SECONDS and MUST be long enough to cover a human approval hold — this is the open question to validate live.",
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash|Read|Write|Edit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node /Users/adir/privtehis/spike/hook.mjs",
+            "timeout": 600
+          }
+        ]
+      }
+    ]
+  }
+}
