@@ -14,7 +14,7 @@
 
 | # | Decision | Choice |
 |---|----------|--------|
-| 1 | **Interception point** | **MCP Gateway** — sits on the tool boundary (agent ↔ tools), *not* the LLM boundary. True enforcement: the agent gets tools *only* through us. |
+| 1 | **Interception point** | **Dual-layer (revised after M0 spike).** For **Claude Code**, primary enforcement is **PreToolUse hooks** — they intercept ALL tools incl. built-in `Bash`/`Read`/`Edit`/`Write` that a pure MCP proxy *cannot see*. The **MCP proxy** is complementary (MCP-routed tools + scanning tool *results*) and is the path for non-Claude-Code agents. Both sit on the tool boundary, not the LLM boundary. |
 | 2 | **Decision engine** | **Deterministic core (no maintainer LLM cost).** OPA + rules + a small *local* ONNX classifier. A generative BYO-LLM intent layer is optional/off by default. |
 | 3 | **Policy engine** | **OPA (Rego).** Cedar adapter deferred to Enterprise. |
 | 4 | **HITL mechanism** | **Synchronous Hold** — gateway holds the JSON-RPC response; pending state in **Redis**; **timeout → Deny** safety net. |
@@ -161,8 +161,12 @@ Pricing hypothesis: **$49/mo** small team · **$299/mo** mid team (by # agents /
 
 ## 7. Milestones
 
-- **M0 — Skeleton (proof of interception):** MCP proxy that transparently forwards
-  `tools/call` between Claude Code and one real MCP tool, with audit logging. *Goal: prove we sit in the path.*
+- **M0 — Spike (proof of interception + hold): ✅ DONE (2026-06-08).** Built a Claude Code
+  PreToolUse hook (`spike/`) that intercepts Bash/Read/Write/Edit, auto-blocks `rm -rf`/`.env`,
+  holds state-changers for synchronous human approval (approve→allow, timeout→deny), and
+  audits every decision. All 5 scenarios pass standalone. **Revised arch:** hooks are the
+  primary Claude Code enforcement surface (built-in tools are invisible to a pure MCP proxy).
+  *Still to measure live:* the hook-timeout ceiling for long holds. Found a pending-cleanup bug.
 - **M1 — Policy + HITL:** OPA integration + default policies + Synchronous Hold + Redis
   pending + timeout→Deny + minimal localhost dashboard (Action Center with diff, Approve/Deny).
   *Demo: "block `rm -rf`."*
