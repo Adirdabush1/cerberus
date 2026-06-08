@@ -16,8 +16,8 @@
 |---|----------|--------|
 | 1 | **Interception point** | **Dual-layer (revised after M0 spike).** For **Claude Code**, primary enforcement is **PreToolUse hooks** — they intercept ALL tools incl. built-in `Bash`/`Read`/`Edit`/`Write` that a pure MCP proxy *cannot see*. The **MCP proxy** is complementary (MCP-routed tools + scanning tool *results*) and is the path for non-Claude-Code agents. Both sit on the tool boundary, not the LLM boundary. |
 | 2 | **Decision engine** | **Deterministic core (no maintainer LLM cost).** OPA + rules + a small *local* ONNX classifier. A generative BYO-LLM intent layer is optional/off by default. |
-| 3 | **Policy engine** | **OPA (Rego).** Cedar adapter deferred to Enterprise. |
-| 4 | **HITL mechanism** | **Synchronous Hold** — gateway holds the JSON-RPC response; pending state in **Redis**; **timeout → Deny** safety net. |
+| 3 | **Policy engine** | **(Revised) Declarative rules as DATA for V1** — `json-logic-js` over a JSON/YAML rule file the dev edits (0 build, ~0ms). Hidden behind a `PolicyEngine` interface so **OPA/Cedar plug in as Enterprise adapters later**. Rules stay editable data, never hardcoded TS `if`s. |
+| 4 | **HITL mechanism** | **Synchronous Hold.** Claude-Code path = the **hook child-process** holds + polls + exits (no long-lived server promise → no leak). MCP-proxy path = single shared Redis subscriber + cleanup in `finally`. **Fail-safe Deny TTL = the configured hook/MCP timeout (minutes, e.g. 300–600s)** — NOT 60s; a human must have time to approve. |
 | 5 | **Distribution** | **Local-first** sidecar/CLI (`npx agentguard`). Approval via **localhost dashboard** with **terminal fallback** (`approval_surface: dashboard \| terminal \| both`). Cloud / Slack / multi-seat / log-retention = paid tier. |
 | 6 | **MVP depth** | **The Security Trinity** — Policy + Behavioral/Anomaly + Content/Injection+Exfil. This is what makes it a WAF, not a linter. |
 
@@ -82,7 +82,7 @@ tokens/prompts in the core architecture.
      flag is set → route to **HITL** (not auto-block — avoids false positives on
      legitimate dev API calls). Admin sees: *"read .env 2m ago, now POSTing to
      evil-site.com — approve/block?"*
-- **Needs:** a **tool taxonomy** (which MCP tools are network egress) — maintained list + schema inference.
+- **Needs:** a **tool taxonomy** (which tools are network egress) — maintained list + schema inference, governed by the **Fail-Closed / No-Celebrity-Benefit** principle: any tool not identified with certainty (e.g. a custom `send_to_webhook`) is treated as the **highest** risk tier (full policy eval / HITL), never given the benefit of the doubt.
 - **v1.1 upgrade:** binary flag → **content-match** (does the outbound payload actually
   contain bytes from the secret?) — turns "suspicion" into "proof."
 
@@ -97,25 +97,29 @@ tokens/prompts in the core architecture.
 
 ---
 
-## 4. Repository Structure (monorepo)
+## 4. Repository Structure (single package — monorepo rejected for MVP)
+
+Workspaces/Turborepo/tsup add build-pipeline friction with zero MVP payoff. One flat
+Node package for the engine; the dashboard is a separate app talking REST/WS only.
 
 ```
 agentguard/
-├── packages/
-│   ├── gateway/         # Node.js + TS MCP proxy (Fastify). The core.
-│   │   ├── src/mcp/         # MCP server (to agent) + client (to upstream tools)
-│   │   ├── src/middleware/  # pre-flight / post-flight pipeline
-│   │   ├── src/signals/     # behavioral / exfil / injection
-│   │   ├── src/policy/      # OPA integration (embedded or sidecar)
-│   │   ├── src/hitl/        # synchronous hold + Redis pending queue + timeout
-│   │   └── src/audit/       # JSONL/SQLite audit log
-│   ├── classifier/      # ONNX injection classifier wrapper (local model)
-│   ├── policies/        # default Rego policies (read=allow, rm -rf/.env=block, write/push/migrate=HITL)
-│   ├── dashboard/       # React + Tailwind + TS — Live Stream · Action Center (diff) · Policy Editor
-│   ├── cli/             # `npx agentguard` — init, run, config
-│   └── shared/          # types, tool taxonomy, schemas
+├── src/                 # the single Node.js + TS package (engine + hook + CLI)
+│   ├── hook/                # Claude Code PreToolUse/PostToolUse hook entry (primary enforcement)
+│   ├── mcp/                 # MCP proxy server+client (complementary / non-Claude-Code agents)
+│   ├── pipeline/            # pre-flight / post-flight decision pipeline
+│   ├── signals/             # behavioral / exfil / injection
+│   ├── policy/              # PolicyEngine interface + json-logic evaluator (default impl)
+│   ├── hitl/                # synchronous hold + pending store + fail-safe deny
+│   ├── audit/               # JSONL/SQLite audit log
+│   ├── taxonomy/            # tool classifier — Fail-Closed (unknown = strictest)
+│   └── contract/            # SINGLE source-of-truth WS/REST message types (copied to dashboard)
+├── rules/               # default policies as editable DATA (json/yaml), NOT code
+├── bin/                 # `npx agentguard` CLI (init, run, config)
+├── dashboard/           # separate React+Tailwind app — Live Stream · Action Center (diff) · Policy Editor
+│                        #   talks to the engine ONLY via REST/WebSocket (no build coupling)
 ├── docs/
-└── examples/            # Claude Code MCP config (proof e2e integration)
+└── examples/            # Claude Code settings + MCP config (e2e integration)
 ```
 
 ---
@@ -125,7 +129,7 @@ agentguard/
 ### ✅ Build on (verified, well-established)
 | Tool | Role | License |
 |------|------|---------|
-| **OPA (Open Policy Agent)** | Policy engine (Rego) — CNCF | Apache-2.0 |
+| **`json-logic-js`** | V1 policy evaluator over declarative rule data — tiny, 0 build | MIT |
 | **Redis** | Sliding-window counters, pending queue, taint state | BSD/RSAL — verify version |
 | **ONNX Runtime** | Run local classifier on CPU | MIT |
 | **MCP SDK** (`@modelcontextprotocol/sdk`) | MCP server/client plumbing | MIT |
@@ -137,7 +141,7 @@ agentguard/
 | **Meta Prompt-Guard-2** | Injection classifier model | Confirm license + ONNX export path; alternatives: Rebuff, Llama-Prompt-Guard |
 | **AgentDojo** (ETH Zurich) | Security-Score benchmark | Post-MVP / investor demo; evaluation harness, not runtime |
 | **Langfuse** | Observability (trace view) | Post-MVP |
-| **Cedar (AWS)** | Enterprise policy lang | Deferred adapter |
+| **OPA (Rego)** / **Cedar (AWS)** | Enterprise policy adapters behind `PolicyEngine` | Deferred — NOT in V1 core |
 
 ### 🟡 Reference only — borrow ideas, do NOT depend on (unverified names)
 `AgentShield`, `Helio`, `Arbitus` (Rust gateway), `Canar.ai` (injection honeypot).
