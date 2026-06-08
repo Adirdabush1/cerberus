@@ -1,0 +1,90 @@
+# AgentGuard — default policy (V1).
+#
+# This is DATA, not code. Edit it freely; no rebuild required.
+# Rules are evaluated top-to-bottom and the FIRST match wins.
+# Each rule's `when` is a json-logic expression evaluated against a fact:
+#   { tool, category, command, path, url }
+# A custom `matches` op runs a regex: { matches: ["<regex>", { var: command }] }
+# Actions: ALLOW | BLOCK | HITL
+#
+# `default` applies when no rule matches. We fail toward human review (HITL),
+# never toward silent ALLOW.
+default: HITL
+
+rules:
+  # ───────────────────────── BLOCK: destructive / secret access ─────────────────────────
+  - id: block-rm-rf
+    description: "Recursive force delete (rm -rf) is blocked outright."
+    action: BLOCK
+    when:
+      matches: ["\\brm\\s+-([a-z]*r[a-z]*f|[a-z]*f[a-z]*r|rf|fr)\\b", { var: command }]
+
+  - id: block-fork-bomb
+    description: "Shell fork-bomb pattern is blocked."
+    action: BLOCK
+    when:
+      matches: [":\\(\\)\\s*\\{\\s*:\\s*\\|\\s*:", { var: command }]
+
+  - id: block-pipe-to-shell
+    description: "Piping a remote download straight into a shell is blocked."
+    action: BLOCK
+    when:
+      matches: ["(curl|wget)\\b[^|]*\\|\\s*(sudo\\s+)?(ba|z)?sh\\b", { var: command }]
+
+  - id: block-env-read-path
+    description: "Reading a .env file is blocked (secret exfiltration risk)."
+    action: BLOCK
+    when:
+      matches: ["(^|/)\\.env(\\.[^/]*)?$", { var: path }]
+
+  - id: block-env-read-cmd
+    description: "Reading a .env file via the shell is blocked."
+    action: BLOCK
+    when:
+      matches: ["\\b(cat|less|more|head|tail|xxd|od)\\b[^&|;]*\\.env\\b", { var: command }]
+
+  # ───────────────────────── HITL: state changers ─────────────────────────
+  - id: hitl-git-push
+    description: "git push to a remote requires human approval."
+    action: HITL
+    when:
+      matches: ["\\bgit\\s+push\\b", { var: command }]
+
+  - id: hitl-publish
+    description: "Publishing a package requires human approval."
+    action: HITL
+    when:
+      matches: ["\\b(npm|yarn|pnpm)\\s+publish\\b", { var: command }]
+
+  - id: hitl-sudo
+    description: "Privilege escalation (sudo) requires human approval."
+    action: HITL
+    when:
+      matches: ["(^|\\s)sudo\\s", { var: command }]
+
+  - id: hitl-write-category
+    description: "Writing or editing a file requires human approval."
+    action: HITL
+    when:
+      "==": [{ var: category }, "WRITE"]
+
+  - id: hitl-egress-category
+    description: "Outbound network calls require human approval."
+    action: HITL
+    when:
+      "==": [{ var: category }, "EGRESS"]
+
+  # ───────────────────────── ALLOW: read-only / safe ─────────────────────────
+  - id: allow-readonly-commands
+    description: "Common read-only shell commands are auto-approved in milliseconds."
+    action: ALLOW
+    when:
+      matches:
+        - "^\\s*(ls|pwd|echo|cat|grep|rg|find|head|tail|wc|which|whoami|date|env|printenv|tree|stat|file|git\\s+(status|log|diff|branch|show|remote|rev-parse)|node\\s+-v|npm\\s+(test|ls|run\\s+test)|cargo\\s+check)\\b"
+        - { var: command }
+
+  - id: allow-read-category
+    description: "Read-only tools (Read/Grep/Glob) are auto-approved."
+    action: ALLOW
+    when:
+      "==": [{ var: category }, "READ"]
