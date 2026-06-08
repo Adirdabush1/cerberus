@@ -1,0 +1,30 @@
+{
+  "name": "agentguard",
+  "version": "0.0.1",
+  "description": "A WAF for autonomous AI agents — intercept, classify, and human-approve tool calls.",
+  "type": "module",
+  "bin": {
+    "agentguard": "./bin/agentguard.mjs"
+  },
+  "scripts": {
+    "engine": "tsx src/cli/index.ts engine",
+    "hook": "tsx src/cli/index.ts hook",
+    "typecheck": "tsc --noEmit",
+    "build": "tsc"
+  },
+  "dependencies": {
+    "js-yaml": "^4.1.0",
+    "json-logic-js": "^2.0.5",
+    "ws": "^8.18.0"
+  },
+  "devDependencies": {
+    "@types/js-yaml": "^4.0.9",
+    "@types/node": "^22.10.2",
+    "@types/ws": "^8.5.13",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.2"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

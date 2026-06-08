@@ -171,9 +171,12 @@ Pricing hypothesis: **$49/mo** small team · **$299/mo** mid team (by # agents /
   audits every decision. All 5 scenarios pass standalone. **Revised arch:** hooks are the
   primary Claude Code enforcement surface (built-in tools are invisible to a pure MCP proxy).
   *Still to measure live:* the hook-timeout ceiling for long holds. Found a pending-cleanup bug.
-- **M1 — Policy + HITL:** OPA integration + default policies + Synchronous Hold + Redis
-  pending + timeout→Deny + minimal localhost dashboard (Action Center with diff, Approve/Deny).
-  *Demo: "block `rm -rf`."*
+- **M1 — Policy + HITL: �️ CORE DONE (engine), dashboard pending.** Single TS package:
+  `PolicyEngine` (json-logic over `rules/default_policy.yaml`) + `IPendingStore`/`InMemoryPendingStore`
+  + Engine with **Synchronous HTTP Hold** (open socket = the hold) + WS feed + dumb-client hook +
+  fail-closed (timeout, disconnect-cleanup, engine-down) + JSONL audit. **11/11 smoke tests pass.**
+  Remaining: the React localhost dashboard (Action Center w/ diff, Approve/Deny) wired over WS.
+  *Demo today (CLI): "block `rm -rf`, hold `git push` for approval."*
 - **M2 — Behavioral signal:** Redis sliding window + runaway detection + Live Stream feed.
   *Demo: "caught a loop."*
 - **M3 — Content signal:** ONNX injection classifier on tool results + secret detection +
