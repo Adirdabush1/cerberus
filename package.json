@@ -6,11 +6,21 @@
   "bin": {
     "agentguard": "./bin/agentguard.mjs"
   },
+  "files": [
+    "dist",
+    "dashboard/dist",
+    "rules",
+    "examples",
+    "bin"
+  ],
   "scripts": {
     "engine": "tsx src/cli/index.ts engine",
     "hook": "tsx src/cli/index.ts hook",
     "typecheck": "tsc --noEmit",
-    "build": "tsc",
+    "build": "npm run build:engine && npm run build:dashboard",
+    "build:engine": "tsc",
+    "build:dashboard": "npm --prefix dashboard run build",
+    "prepublishOnly": "npm run build",
     "test:behavioral": "tsx scripts/behavioral.test.ts",
     "e2e:behavioral": "node scripts/behavioral-e2e.mjs",
     "test:content": "tsx scripts/content.test.ts",
@@ -18,7 +28,8 @@
     "test:injection": "tsx scripts/injection.test.ts",
     "e2e:injection": "node scripts/injection-e2e.mjs",
     "test:risk": "tsx scripts/risk.test.ts",
-    "e2e:risk": "node scripts/risk-e2e.mjs"
+    "e2e:risk": "node scripts/risk-e2e.mjs",
+    "test:init": "tsx scripts/init.test.ts"
   },
   "dependencies": {
     "js-yaml": "^4.1.0",

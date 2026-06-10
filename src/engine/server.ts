@@ -14,6 +14,8 @@
  */
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
 import { randomUUID } from 'node:crypto';
+import { existsSync, readFileSync, statSync } from 'node:fs';
+import { extname, join, normalize, sep } from 'node:path';
 import { WebSocketServer, type WebSocket } from 'ws';
 import { JsonLogicPolicyEngine, type PolicyEngine } from '../policy/engine.js';
 import { InMemoryPendingStore } from '../policy/store.js';
@@ -54,6 +56,8 @@ export interface EngineOptions {
   content: ContentConfig;
   injection: InjectionConfig;
   weightsPath: string;
+  /** If set, serve the built dashboard (static files) from this dir at `/` (D20). */
+  staticDir?: string;
 }
 
 export class Engine {
@@ -128,6 +132,10 @@ export class Engine {
       }
       if (req.method === 'POST' && req.url === '/inspect') {
         return await this.handleInspect(req, res);
+      }
+      // The dashboard (static) is served LAST, so it never shadows an API route (D20).
+      if (req.method === 'GET' && this.opts.staticDir) {
+        return this.serveStatic(req, res);
       }
       json(res, 404, { error: 'not found' });
     } catch (err) {
@@ -256,6 +264,24 @@ export class Engine {
     for (const ws of this.clients) send(ws, msg);
   }
 
+  /* ------------------------------ static dashboard ------------------------------ */
+
+  /** Serve the built dashboard from opts.staticDir, with SPA fallback to index.html (D20). */
+  private serveStatic(req: IncomingMessage, res: ServerResponse): void {
+    const dir = this.opts.staticDir as string;
+    const urlPath = decodeURIComponent((req.url ?? '/').split('?')[0] ?? '/');
+    const rel = urlPath === '/' || urlPath === '' ? 'index.html' : urlPath.replace(/^\/+/, '');
+    let file = normalize(join(dir, rel));
+
+    // path-traversal guard: the resolved file must stay inside the static dir.
+    if (file !== dir && !file.startsWith(dir + sep)) return json(res, 403, { error: 'forbidden' });
+    if (!existsSync(file) || !statSync(file).isFile()) file = join(dir, 'index.html'); // SPA fallback
+    if (!existsSync(file)) return json(res, 404, { error: 'dashboard not built (run `npm run build`)' });
+
+    res.writeHead(200, { 'content-type': contentType(extname(file)) });
+    res.end(readFileSync(file));
+  }
+
   /* --------------------------------- audit ---------------------------------- */
 
   private writeAudit(
@@ -287,6 +313,21 @@ export class Engine {
 
 function finalResult(action: FinalAction, reason: string): PipelineResult {
   return { action, reason };
+}
+
+const CONTENT_TYPES: Readonly<Record<string, string>> = {
+  '.html': 'text/html; charset=utf-8',
+  '.js': 'text/javascript; charset=utf-8',
+  '.css': 'text/css; charset=utf-8',
+  '.json': 'application/json; charset=utf-8',
+  '.svg': 'image/svg+xml',
+  '.png': 'image/png',
+  '.ico': 'image/x-icon',
+  '.woff2': 'font/woff2',
+};
+
+function contentType(ext: string): string {
+  return CONTENT_TYPES[ext.toLowerCase()] ?? 'application/octet-stream';
 }
 
 function json(res: ServerResponse, status: number, body: unknown): void {

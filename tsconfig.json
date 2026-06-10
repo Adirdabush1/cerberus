@@ -12,8 +12,8 @@
     "declaration": true,
     "sourceMap": true,
     "outDir": "dist",
-    "rootDir": "."
+    "rootDir": "src"
   },
-  "include": ["src", "bin"],
-  "exclude": ["node_modules", "dist", "dashboard"]
+  "include": ["src"],
+  "exclude": ["node_modules", "dist", "dashboard", "packages", "scripts"]
 }
