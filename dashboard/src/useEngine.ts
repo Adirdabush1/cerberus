@@ -7,7 +7,18 @@ import type {
   ServerToDashboard,
 } from './contract';
 
-const WS_URL = import.meta.env.VITE_AG_WS ?? 'ws://127.0.0.1:9000/ws';
+// When the dashboard is served BY the engine (production), derive the WS URL from the page origin so
+// it works on whatever host/port the engine runs. For standalone `vite dev`, set VITE_AG_WS (the dev
+// server runs on a different port than the engine).
+function defaultWsUrl(): string {
+  if (typeof window !== 'undefined' && window.location.protocol.startsWith('http')) {
+    const proto = window.location.protocol === 'https:' ? 'wss' : 'ws';
+    return `${proto}://${window.location.host}/ws`;
+  }
+  return 'ws://127.0.0.1:9000/ws';
+}
+
+const WS_URL = import.meta.env.VITE_AG_WS ?? defaultWsUrl();
 
 export interface EngineState {
   connected: boolean;

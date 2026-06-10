@@ -219,8 +219,15 @@ Pricing hypothesis: **$49/mo** small team · **$299/mo** mid team (by # agents /
     (D18) — every M1/M2/M3a/M3b guarantee preserved; attribution uses signal-priority so `signal:'content'`
     survives. Dashboard shows score/AUDIT. **13/13 golden vectors + 6/6 e2e (four bands) + full
     regression 86/86 green** (`npm run test:risk`, `npm run e2e:risk`).
-- **M4 — Polish + package / Dashboard + Investigation UI:** `npx agentguard` CLI, config
-  (`approval_surface`), Policy Editor UI, docs, example Claude Code config. *Goal: install in a minute.*
+- **M4 — Packaging: ✅ DONE (core).** Design in `brainstorms/m4-packaging-ux.md` (D19–D21).
+  `npm run build` compiles the engine (`tsc`→`dist/`) + dashboard (`vite`→`dashboard/dist`); `bin`
+  prefers compiled `dist`, falls back to tsx for dev, exports `AG_HOME` for resource resolution. The
+  **engine serves the built dashboard** at `/` (single process, SPA fallback + path-traversal guard;
+  API/WS routes take precedence). **`agentguard init`** safely merges the Pre/PostToolUse hooks into
+  `.claude/settings.json` (idempotent + backup; `--global`, `--print`). package.json `files` +
+  `prepublishOnly`; README rewritten (install → init → run → demo). **13/13 init unit + full
+  regression 99/99 green** incl. compiled-engine smoke. *Deferred: Investigation UI (B), Policy Editor
+  + `approval_surface` (C), actual `npm publish` (gated on THIRD_PARTY_NOTICES).* *Goal: install in a minute — met.*
 - **M5 — Multi-agent support:** adapters beyond Claude Code (OpenAI Codex, Cursor, Roo, Cline) feeding
   the same agent-agnostic engine via the hook/MCP-proxy adapter layer.
 - **Post-MVP / Paid:** cloud + Slack + multi-seat + retention; AgentDojo Score; Langfuse;

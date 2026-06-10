@@ -1,27 +1,62 @@
-# AgentGuard (APG — Agent Permission Gateway)
+# AgentGuard
 
-An **active firewall / proxy for autonomous AI agents**. AgentGuard sits between an AI
-agent (Claude Code, Devin, in-house agents) and its execution environment, intercepts
-every **Tool / Function Call**, classifies it by risk policy, and pauses dangerous
-executions for **real-time human approval (Human-in-the-Loop)**.
+A **local-first security gateway for autonomous AI agents.** AgentGuard sits between an agent
+(Claude Code today) and its execution environment, intercepts every **tool call**, scores it across
+four signals, and either allows it, holds it for **human approval**, or blocks it — all on your
+machine, with **no external API and nothing leaving the box.**
 
-## The three lines of defense
-1. **Auto-Approve** — read-only / safe actions (read config, `git status`, internal GET). Passed through in milliseconds and logged.
-2. **Auto-Block** — destructive or anomalous actions (`rm -rf`, reading `.env`, runaway loops). Cut off; a synthetic `Permission Denied` is returned to the agent; admin is alerted.
-3. **Human-in-the-Loop (HITL)** — state-changing actions (file writes, `git push`, DB migrations, paid external API calls). Request is held pending; a card pops in the dashboard / Slack with an exact diff; on **Approve** the agent continues seamlessly.
+## What it catches
+- **Policy** — deterministic rules (block `rm -rf`, hold `git push`, fail-closed on unknown tools).
+- **Behavioral** — runaway agents and tight loops (tool-call rate / repetition).
+- **Content** — secrets loaded into context, then a **taint → exfil** gate on outbound calls.
+- **Injection** — prompt-injection in tool *results* (a poisoned README) raises the session's risk.
 
-## Proposed stack
-- **Proxy:** Node.js + TypeScript (Express/Fastify)
-- **State:** Redis (pending HITL requests, rate/anomaly tracking)
-- **Dashboard:** React + Tailwind + TypeScript — Live Stream · Action Center · Policy Editor
-- **Notifications:** Slack + WebSockets / Long-Polling
-- **Distribution:** B2B **Open-Core** (OSS proxy + CLI; paid cloud dashboard, multi-seat, log retention, Slack integration)
+These feed a **Risk Engine** that aggregates a weighted score → `ALLOW · AUDIT · HITL · BLOCK`, with
+deterministic prohibitions as a hard floor the score can never override.
 
-## Open architectural questions (to resolve in planning)
-- **Interception point:** LLM-API proxy vs. MCP gateway vs. runtime/execution hook — how do we guarantee the agent cannot bypass the gate?
-- **Classification engine:** hardcoded Rules/Regex vs. a small local LLM classifying intent (or a hybrid).
-- **Tool-call format(s)** to support first: OpenAI, Anthropic, MCP.
-- **Deployment model** for the OSS core: local CLI/sidecar vs. hosted gateway.
+## Quickstart
 
-## Status
-Planning phase. No production code yet.
+```bash
+npm install            # (in a clone) install deps
+npm run build          # compile the engine + build the dashboard
+
+# wire AgentGuard into Claude Code (merges into .claude/settings.json — backed up, idempotent):
+agentguard init                 # project-level   (--global for ~/.claude, --print to just show it)
+
+# start the gateway + dashboard (one process):
+agentguard engine               # then open http://127.0.0.1:9000/
+```
+
+Use Claude Code as usual — tool calls now route through AgentGuard. Dangerous ones pause in the
+dashboard with an exact diff; Approve/Deny from there.
+
+## How it plugs in
+- **PreToolUse hook → `/intercept`** is the single hard enforcement point (allow/deny; HITL holds the
+  socket open until you decide).
+- **PostToolUse hook → `/inspect`** is observe-only: it updates the session's contamination state so
+  the *next* action is judged with full context. It never modifies a tool result.
+- The engine is **agent-agnostic** at its core; the Claude Code hooks are just the first adapter.
+
+## Architecture
+```
+PreToolUse  ─▶ /intercept ─▶ Policy + Behavioral + Content/Injection ─▶ RiskEngine ─▶ ALLOW/AUDIT/HITL/BLOCK
+PostToolUse ─▶ /inspect   ─▶ secret detection + injection classifier ─▶ session contamination state
+                                                                   (audit log + WebSocket → dashboard)
+```
+Single Node + TypeScript package; the dashboard is a Vite/React app served by the engine. Rules and
+risk weights are editable **YAML data**, not code (`rules/`).
+
+## Local-first & licensing
+No external API, no API key, nothing leaves the machine. The optional injection model
+([`@agentguard/injection-model`](packages/injection-model), ProtectAI DeBERTa, Apache-2.0) upgrades
+the built-in heuristic classifier; install it only if you want it. The core is OSS-clean
+(Apache/MIT-compatible deps); Meta Prompt-Guard is deliberately kept out of core (Llama license).
+
+## Development
+```bash
+npm run engine            # run from source via tsx (dev)
+npm run typecheck
+npm run test:behavioral && npm run test:content && npm run test:injection && npm run test:risk && npm run test:init
+npm run e2e:behavioral && npm run e2e:content && npm run e2e:injection && npm run e2e:risk
+```
+See `PLAN.md` for milestones and `brainstorms/` for the design records behind each decision.
