@@ -1,0 +1,22 @@
+# Test fixture for the M3c risk e2e — a RELAXED profile that ALLOWs egress (e.g. a team that
+# allow-lists its dev API calls). With the generic egress→HITL rule gone, the risk SCORE governs the
+# soft middle, so AUDIT and score-driven BLOCK bands become observable. Hard BLOCK rules stay.
+default: HITL
+rules:
+  - id: block-rm-rf
+    description: "Recursive force delete (rm -rf) is blocked outright."
+    action: BLOCK
+    when:
+      matches: ["\\brm\\s+-([a-z]*r[a-z]*f|[a-z]*f[a-z]*r|rf|fr)\\b", { var: command }]
+
+  - id: allow-egress-relaxed
+    description: "Outbound calls are allow-listed in this relaxed profile (risk score still applies)."
+    action: ALLOW
+    when:
+      "==": [{ var: category }, "EGRESS"]
+
+  - id: allow-read-category
+    description: "Read-only tools are auto-approved."
+    action: ALLOW
+    when:
+      "==": [{ var: category }, "READ"]

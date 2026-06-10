@@ -17,16 +17,32 @@ import { randomUUID } from 'node:crypto';
 import { WebSocketServer, type WebSocket } from 'ws';
 import { JsonLogicPolicyEngine, type PolicyEngine } from '../policy/engine.js';
 import { InMemoryPendingStore } from '../policy/store.js';
+import { InMemoryBehavioralMonitor, type AnomalyConfig, type BehavioralMonitor } from '../signals/behavioral.js';
+import {
+  InMemoryContaminationMonitor,
+  type ContaminationMonitor,
+  type ContentConfig,
+} from '../signals/content.js';
+import {
+  DisabledInjectionClassifier,
+  loadInjectionClassifier,
+  type InjectionClassifier,
+  type InjectionConfig,
+} from '../signals/injection.js';
+import { WeightedRiskEngine, type RiskEngine } from '../risk/engine.js';
 import { AuditLog } from '../audit/index.js';
 import { classify } from '../taxonomy/index.js';
 import type {
   AuditEntry,
   DashboardToServer,
   FinalAction,
+  InspectRequest,
   MCPToolCall,
   PipelineResult,
+  RiskAssessment,
   SecurityViolation,
   ServerToDashboard,
+  SignalSource,
 } from '../contract/types.js';
 
 export interface EngineOptions {
@@ -34,10 +50,18 @@ export interface EngineOptions {
   rulesPath: string;
   auditFile: string;
   ttlMs: number;
+  behavioral: AnomalyConfig;
+  content: ContentConfig;
+  injection: InjectionConfig;
+  weightsPath: string;
 }
 
 export class Engine {
   private readonly policy: PolicyEngine;
+  private readonly behavioral: BehavioralMonitor;
+  private readonly contamination: ContaminationMonitor;
+  private readonly risk: RiskEngine;
+  private injection: InjectionClassifier = new DisabledInjectionClassifier();
   private readonly store = new InMemoryPendingStore();
   private readonly audit: AuditLog;
   private readonly clients = new Set<WebSocket>();
@@ -46,6 +70,9 @@ export class Engine {
 
   constructor(private readonly opts: EngineOptions) {
     this.policy = new JsonLogicPolicyEngine(opts.rulesPath);
+    this.behavioral = new InMemoryBehavioralMonitor(opts.behavioral);
+    this.contamination = new InMemoryContaminationMonitor(opts.content);
+    this.risk = new WeightedRiskEngine(opts.weightsPath);
     this.audit = new AuditLog(opts.auditFile);
 
     // fan out store lifecycle to every connected dashboard
@@ -57,8 +84,21 @@ export class Engine {
     this.wss.on('connection', (ws) => this.onDashboardConnect(ws));
   }
 
-  listen(): Promise<void> {
-    return new Promise((resolve) => this.http.listen(this.opts.port, () => resolve()));
+  async listen(): Promise<void> {
+    // Resolve the injection classifier (D13): the ONNX companion package if installed, else the
+    // always-on heuristic baseline, else disabled. Done here so a slow model load doesn't block import.
+    this.injection = await loadInjectionClassifier(this.opts.injection);
+    await new Promise<void>((resolve) => this.http.listen(this.opts.port, () => resolve()));
+  }
+
+  /** Name of the resolved injection classifier ('onnx' / 'heuristic' / 'disabled') — for the CLI banner. */
+  get injectionClassifier(): string {
+    return this.injection.name;
+  }
+
+  /** Version of the loaded risk-weights config — for the CLI banner + drift traceability. */
+  get riskVersion(): string {
+    return this.risk.version;
   }
 
   close(): Promise<void> {
@@ -86,21 +126,32 @@ export class Engine {
       if (req.method === 'POST' && req.url === '/intercept') {
         return await this.handleIntercept(req, res);
       }
+      if (req.method === 'POST' && req.url === '/inspect') {
+        return await this.handleInspect(req, res);
+      }
       json(res, 404, { error: 'not found' });
     } catch (err) {
       json(res, 400, { error: (err as Error).message });
     }
   }
 
-  /** The synchronous hold. */
+  /** The synchronous hold + multi-signal decision pipeline (PreToolUse). */
   private async handleIntercept(req: IncomingMessage, res: ServerResponse): Promise<void> {
     const call = await readJson<MCPToolCall>(req);
-    const decision = this.policy.evaluate(call);
 
-    // Auto paths: answer immediately.
-    if (decision.action === 'ALLOW' || decision.action === 'BLOCK') {
-      this.writeAudit(call, decision.action, decision.ruleId, decision.reason, false);
-      return json(res, 200, finalResult(decision.action, decision.reason));
+    // Run all three signals (each has side effects — behavioral records the call, content records
+    // path-risk), then fold them into one decision via strictest-wins (D7).
+    const anomaly = this.behavioral.record(call); // Signal 1: runaway / loop
+    const policy = this.policy.evaluate(call); //     Signal 2: deterministic rules
+    const content = this.contamination.evaluate(call); // Signal 3: contamination / exfil
+    // M3c: aggregate the three into one risk-scored decision (hard floor + weighted bands).
+    const { action, reason, ruleId, signal, risk } = this.risk.assess(policy, anomaly, content);
+
+    // Auto paths: answer immediately. (AUDIT band collapses to ALLOW for the agent — D17 — but the
+    // audit record carries risk.band='AUDIT' so it surfaces as elevated-risk on the dashboard.)
+    if (action === 'ALLOW' || action === 'BLOCK') {
+      this.writeAudit(call, action, ruleId, reason, false, signal, risk);
+      return json(res, 200, finalResult(action, reason));
     }
 
     // HITL: build a violation, hold the socket, and wait for a verdict.
@@ -108,10 +159,12 @@ export class Engine {
       id: randomUUID(),
       toolCall: call,
       category: classify(call.tool),
-      ruleId: decision.ruleId,
-      reason: decision.reason,
+      ruleId,
+      reason,
       createdAt: Date.now(),
       ttlMs: this.opts.ttlMs,
+      signal,
+      risk,
     };
 
     let settled = false;
@@ -125,8 +178,61 @@ export class Engine {
     const result = await this.store.registerContext(violation, this.opts.ttlMs);
     settled = true;
 
-    this.writeAudit(call, result.action, decision.ruleId, result.reason, true);
+    this.writeAudit(call, result.action, ruleId, result.reason, true, signal, risk);
     if (!res.writableEnded) json(res, 200, result);
+  }
+
+  /**
+   * PostToolUse inspection (D2/D9). Observe-only: update the session's contamination state from the
+   * executed tool's result, never modify the result. The hook waits only for this state-commit.
+   */
+  private async handleInspect(req: IncomingMessage, res: ServerResponse): Promise<void> {
+    const body = await readJson<InspectRequest>(req);
+    const call: MCPToolCall = { tool: body.tool, input: body.input ?? {}, sessionId: body.sessionId };
+    const text = body.toolResponse ?? '';
+    const outcome = this.contamination.inspect(call, text);
+
+    // Signal 3b (injection): classify the result; a positive raises the session's posture so the
+    // next egress is gated (D12). Async/observe-only — never withholds or blocks the result.
+    let injectionFlagged = false;
+    let injectionScore = 0;
+    if (this.injection.available) {
+      const verdict = await this.injection.classify(text);
+      injectionScore = verdict.score;
+      if (verdict.score >= this.opts.injection.threshold) {
+        injectionFlagged = true;
+        this.contamination.flagInjection(call.sessionId ?? 'default', verdict.score, call.tool);
+        this.writeAudit(
+          call,
+          'ALLOW',
+          'content-injection-detected',
+          `Prompt-injection detected in ${call.tool} result (score ${verdict.score.toFixed(2)}, ${this.injection.name}). Session posture raised — outbound calls now require review.`,
+          false,
+          'content',
+        );
+      }
+    }
+
+    if (outcome.tainted) {
+      // Auditable security event: a secret entered the agent's context. Not a block (the read already
+      // happened) — it arms the exfil gate for subsequent egress on this session.
+      this.writeAudit(
+        call,
+        'ALLOW',
+        'content-secret-loaded',
+        `Secret loaded into context via ${call.tool}: ${outcome.secretTypes.join(', ')}. Session tainted — outbound calls now require review.`,
+        false,
+        'content',
+      );
+    }
+    return json(res, 200, {
+      ok: true,
+      tainted: outcome.tainted,
+      secretTypes: outcome.secretTypes,
+      injectionFlagged,
+      injectionScore,
+      classifier: this.injection.name,
+    });
   }
 
   /* ------------------------------- WebSocket -------------------------------- */
@@ -158,6 +264,8 @@ export class Engine {
     ruleId: string | null,
     reason: string,
     viaHitl: boolean,
+    signal: SignalSource,
+    risk?: RiskAssessment,
   ): void {
     const entry: AuditEntry = {
       ts: Date.now(),
@@ -167,6 +275,8 @@ export class Engine {
       ruleId,
       reason,
       viaHitl,
+      signal,
+      risk,
     };
     this.audit.record(entry);
     this.broadcast({ type: 'audit', entry });

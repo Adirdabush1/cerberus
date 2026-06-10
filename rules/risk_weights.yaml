@@ -1,0 +1,33 @@
+# AgentGuard — M3c risk-aggregation weights (DATA, not code).
+#
+# The RiskEngine turns each signal's facts into weighted factors, then:
+#   1. HARD FLOOR — a deterministic BLOCK (policy BLOCK, behavioral runaway) blocks regardless of score.
+#   2. SCORE — for everything else: group factors by "concern", take the MAX within each group
+#      (normalization, D16 #1 — overlapping signals about the SAME concern don't double-count, so e.g.
+#      `secret + egress` stays HITL and never silently escalates to BLOCK, per D4), then SUM across
+#      groups. Distinct concerns stacking is what escalates toward BLOCK.
+#   3. BAND — map the summed score to an action band.
+#
+# Calibration is CONSERVATIVE (D18): each strong single signal already reaches the HITL band on its
+# own (preserving every M1/M2/M3a/M3b guarantee); aggregation only adds escalation on top.
+# `version` is stamped into every audit record for drift traceability (D16 #2). Golden test vectors
+# in scripts/risk.test.ts lock the expected bands — change weights only if those still pass (D16 #3).
+
+version: m3c-risk-v1.0
+
+bands:
+  audit: 40   # >= audit  -> AUDIT (ALLOW to the agent + elevated-risk annotation)
+  hitl: 75    # >= hitl   -> HITL  (held for human)
+  block: 150  # >= block  -> BLOCK
+
+# factor weights, grouped by concern. score = sum over groups of max(points in group).
+groups:
+  egress:                 # one "outbound risk" concern — these never stack with each other
+    policy_egress: 75     # policy HITL on an EGRESS-category call (the default egress rule)
+    content_exfil: 80     # a secret was loaded and the agent is egressing (D4: HITL, not auto-block)
+    content_injection: 50 # the session ingested injection-flagged content and is egressing
+    path_risk: 25         # accessed a sensitive path, now egressing (weak early-warning, D3/D4)
+  command:                # a non-egress state-changer requiring review
+    policy_hitl: 75       # policy HITL on a non-egress call (git push, write, sudo, unknown tool…)
+  behavioral:             # runaway / loop pressure (review tier; hard block is a floor, not scored)
+    behavioral_review: 75

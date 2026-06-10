@@ -177,12 +177,52 @@ Pricing hypothesis: **$49/mo** small team · **$299/mo** mid team (by # agents /
   (timeout, disconnect-cleanup, engine-down) + JSONL audit. **11/11 engine smoke + WS path verified.**
   **Dashboard** (`/dashboard`, Vite+React+TS+Tailwind v4) — Action Center w/ diff + Approve/Deny +
   Live Stream, talks WS only, builds clean. *Demo: "block `rm -rf`, hold `git push`, approve from UI."*
-- **M2 — Behavioral signal:** Redis sliding window + runaway detection + Live Stream feed.
-  *Demo: "caught a loop."*
-- **M3 — Content signal:** ONNX injection classifier on tool results + secret detection +
-  exfil taint state machine → HITL. *Demo: "caught a poisoned README trying to steal .env." → this is the MVP.*
-- **M4 — Polish + package:** `npx agentguard` CLI, config (`approval_surface`), Policy
-  Editor UI, docs, example Claude Code config. *Goal: install in a minute.*
+- **M2 — Behavioral signal: ✅ DONE (local tier).** `BehavioralMonitor` interface +
+  `InMemoryBehavioralMonitor` — per-session sliding window over tool-call **rate** and
+  **repetition** (not token spend), two-tier (soft→escalate ALLOW to HITL, hard ceiling→auto-BLOCK).
+  Wired into the intercept pipeline ahead of policy (a behavioral block overrides a permissive
+  policy); `signal` provenance (`policy`/`behavioral`/`content`) threaded through audit + WS +
+  dashboard (ANOMALY badges). Idle sessions evicted so the monitor can't leak. Env-configurable
+  (`AG_WINDOW_MS`/`AG_MAX_RATE`/`AG_MAX_REPEAT`/`AG_HARD_MULT`). **9/9 unit + 8/8 e2e "caught a
+  loop" through the real /intercept path** (`npm run test:behavioral`, `npm run e2e:behavioral`).
+  *Redis sliding window deferred — see Open Flag #210; the interface is the drop-in seam for the
+  multi-instance paid tier.* *Demo: "caught a loop."*
+- **M3 — Content signal** (split after design review — see `brainstorms/m3-content-signal.md`):
+  - **M3a — Deterministic content signal: ✅ DONE.** Contamination/taint model, fully local, zero ML.
+    New PostToolUse hook → `POST /inspect` (observe-only) runs **secret detection** (curated patterns
+    + entropy fallback) on tool results and updates a per-session contamination state;
+    `InMemoryContaminationMonitor` (Redis-ready interface, mirrors M2). **Enforcement is PreToolUse-only**
+    (D2): the three signals now fold via **uniform strictest-wins** (`combine()`, replacing M2's ad-hoc
+    combine). Asymmetric decay (D5): content-confirmed taint persists for the session, path-risk decays
+    (TTL). Tiered (D4): content-confirmed + egress → **HITL** with a rich exfil reason (`signal:'content'`),
+    path-only → audit; auto-BLOCK deferred to v1.1 content-match. `/inspect` is sync-state-commit (D9).
+    **8/8 unit + 10/10 e2e ("caught the exfil") + M1 smoke 11/11 + M2 8/8 still green** (`npm run
+    test:content`, `npm run e2e:content`). Example Claude Code config in `examples/`. Dashboard shows
+    EXFIL badges. *Demo: "loaded an AWS key, then the agent's outbound POST is held as an exfil risk."*
+  - **M3b — Injection signal: ✅ DONE (core).** Async posture escalation (`brainstorms/m3b-injection-classifier.md`).
+    `/inspect` classifies tool results; a flagged result raises the session's posture so the **next
+    egress is held (HITL, `signal:'content'`, ruleId `content-injection`) even with no secret loaded** —
+    enforcement stays PreToolUse-only (D2/D12), the flag decays via TTL. **Licensing resolved (D10/D11):**
+    Meta Prompt-Guard is Llama-Community-licensed (NOT OSI) → kept out of core; the OSS-clean core uses
+    a deterministic **heuristic baseline** always on, with **ProtectAI DeBERTa (Apache-2.0) ONNX as an
+    optional companion** `@agentguard/injection-model` (`InjectionClassifier` interface; "recommended
+    but optional", D13). Core publishable under MIT/Apache. **9/9 unit + 12/12 e2e ("caught the
+    poisoned README") + full regression 67/67 green** (`npm run test:injection`, `npm run e2e:injection`).
+    *ONNX adapter is a real scaffold, not yet run on the model — verify live + measure latency (Risk #2).*
+  - **M3c — Risk Aggregation Engine: ✅ DONE.** Replaced strictest-wins `combine()` with
+    `WeightedRiskEngine` (`src/risk/engine.ts`) — design in `brainstorms/m3c-risk-engine.md` (D14–D18).
+    **Per-call score from decaying state** (D14), **hard floor + score** (D15: deterministic BLOCK
+    bypasses the sum), **centralized versioned weight config** `rules/risk_weights.yaml` with
+    normalization (group-max-sum so `secret+egress` stays HITL, not BLOCK — D4) + golden test vectors
+    (D16). **AUDIT** = ALLOW-to-agent + risk annotation (D17; binary agent contract preserved);
+    `risk { score, band, version, factors }` added to audit + violations. Calibration **conservative**
+    (D18) — every M1/M2/M3a/M3b guarantee preserved; attribution uses signal-priority so `signal:'content'`
+    survives. Dashboard shows score/AUDIT. **13/13 golden vectors + 6/6 e2e (four bands) + full
+    regression 86/86 green** (`npm run test:risk`, `npm run e2e:risk`).
+- **M4 — Polish + package / Dashboard + Investigation UI:** `npx agentguard` CLI, config
+  (`approval_surface`), Policy Editor UI, docs, example Claude Code config. *Goal: install in a minute.*
+- **M5 — Multi-agent support:** adapters beyond Claude Code (OpenAI Codex, Cursor, Roo, Cline) feeding
+  the same agent-agnostic engine via the hook/MCP-proxy adapter layer.
 - **Post-MVP / Paid:** cloud + Slack + multi-seat + retention; AgentDojo Score; Langfuse;
   Cedar adapter; BYO-LLM intent layer; exfil content-match upgrade; $-budget via LLM-proxy.
 

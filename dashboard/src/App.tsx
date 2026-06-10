@@ -41,13 +41,34 @@ function ViolationCard({
 }) {
   const { title, body } = describe(v.toolCall);
   const remaining = Math.max(0, Math.round((v.createdAt + v.ttlMs - now) / 1000));
+  const anomaly = v.signal === 'behavioral';
+  const exfil = v.signal === 'content';
   return (
-    <div className="rounded-xl border border-amber-500/30 bg-slate-900/80 shadow-lg shadow-black/30 overflow-hidden animate-[pulse_2s_ease-in-out_1]">
+    <div
+      className={`rounded-xl border bg-slate-900/80 shadow-lg shadow-black/30 overflow-hidden animate-[pulse_2s_ease-in-out_1] ${
+        anomaly || exfil ? 'border-red-500/50' : 'border-amber-500/30'
+      }`}
+    >
       <div className="flex items-center gap-2 px-4 py-2.5 border-b border-white/5">
         <span className={`text-[11px] font-semibold px-2 py-0.5 rounded ring-1 ${CATEGORY_STYLE[v.category]}`}>
           {v.category}
         </span>
+        {anomaly && (
+          <span className="text-[11px] font-semibold px-2 py-0.5 rounded bg-red-500/20 text-red-300 ring-1 ring-red-500/40">
+            ⚠ ANOMALY
+          </span>
+        )}
+        {exfil && (
+          <span className="text-[11px] font-semibold px-2 py-0.5 rounded bg-red-500/20 text-red-300 ring-1 ring-red-500/40">
+            🛡 EXFIL RISK
+          </span>
+        )}
         <span className="text-xs text-slate-400">{v.toolCall.tool}</span>
+        {v.risk && (
+          <span className="text-[11px] font-semibold px-2 py-0.5 rounded bg-slate-700/60 text-slate-200 ring-1 ring-white/10" title={`band ${v.risk.band} · ${v.risk.version}`}>
+            ⚖ {v.risk.score}
+          </span>
+        )}
         <span className="ml-auto text-xs tabular-nums text-amber-300/80">⏳ {remaining}s</span>
       </div>
       <div className="px-4 py-3">
@@ -85,6 +106,18 @@ function AuditRow({ e, now }: { e: AuditEntry; now: number }) {
         {allow ? 'ALLOW' : 'BLOCK'}
       </span>
       {e.viaHitl && <span className="text-[10px] px-1 rounded bg-amber-500/15 text-amber-300">HITL</span>}
+      {e.signal === 'behavioral' && (
+        <span className="text-[10px] px-1 rounded bg-red-500/15 text-red-300">ANOMALY</span>
+      )}
+      {e.signal === 'content' && (
+        <span className="text-[10px] px-1 rounded bg-red-500/15 text-red-300">EXFIL</span>
+      )}
+      {e.risk?.band === 'AUDIT' && (
+        <span className="text-[10px] px-1 rounded bg-amber-500/15 text-amber-300">AUDIT</span>
+      )}
+      {e.risk && e.risk.score > 0 && (
+        <span className="text-[10px] tabular-nums text-slate-500" title={`band ${e.risk.band} · ${e.risk.version}`}>⚖{e.risk.score}</span>
+      )}
       <span className="text-slate-300 truncate">{e.tool}</span>
       <span className="text-slate-500 truncate flex-1">{e.ruleId ?? e.reason}</span>
       <span className="text-slate-600 tabular-nums shrink-0">{ago(e.ts, now)}</span>
