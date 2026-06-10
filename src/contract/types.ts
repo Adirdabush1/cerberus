@@ -15,8 +15,34 @@ export type ToolCategory = 'READ' | 'WRITE' | 'EXECUTE' | 'EGRESS' | 'UNKNOWN';
 /** What the policy engine decides for a single tool call. */
 export type PolicyAction = 'ALLOW' | 'BLOCK' | 'HITL';
 
+/** Which defense line produced a decision. ('content' is reserved for M3 injection/exfil.) */
+export type SignalSource = 'policy' | 'behavioral' | 'content';
+
 /** The only two outcomes the agent ever sees. HITL always collapses to one of these. */
 export type FinalAction = 'ALLOW' | 'BLOCK';
+
+/**
+ * Risk band from the M3c aggregation engine. `AUDIT` collapses to ALLOW for the agent (binary
+ * contract preserved) but is surfaced as elevated-risk; `HITL`/`BLOCK` behave as their actions.
+ */
+export type RiskBand = 'ALLOW' | 'AUDIT' | 'HITL' | 'BLOCK';
+
+/** One weighted contribution to the risk score, for explainability in the audit/dashboard. */
+export interface RiskFactor {
+  source: SignalSource;
+  label: string;
+  points: number;
+  group: string;
+}
+
+/** The explainable output of the risk engine for one decision. */
+export interface RiskAssessment {
+  score: number;
+  band: RiskBand;
+  version: string; // the weights-config version that produced this (drift traceability)
+  factors: RiskFactor[];
+  hardFloor: boolean; // true when a deterministic BLOCK floored the decision, bypassing the score
+}
 
 /**
  * A normalized tool call. Works for both Claude Code built-in tools
@@ -50,6 +76,19 @@ export interface SecurityViolation {
   reason: string;
   createdAt: number;
   ttlMs: number;
+  signal: SignalSource;
+  risk?: RiskAssessment;
+}
+
+/**
+ * PostToolUse → Engine `/inspect` body. The hook posts the executed tool's result so the engine
+ * can update its per-session contamination state. Observe-only: the engine never modifies the result.
+ */
+export interface InspectRequest {
+  tool: string;
+  input: Record<string, unknown>;
+  sessionId?: string;
+  toolResponse: string;
 }
 
 /** The final, binary verdict returned to the hook (and thus to the agent). */
@@ -68,6 +107,8 @@ export interface AuditEntry {
   ruleId: string | null;
   reason: string;
   viaHitl: boolean;
+  signal: SignalSource;
+  risk?: RiskAssessment;
 }
 
 /* ----------------------------- WebSocket contract ----------------------------- */

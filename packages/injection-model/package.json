@@ -1,0 +1,16 @@
+{
+  "name": "@agentguard/injection-model",
+  "version": "0.0.1",
+  "description": "Optional ONNX prompt-injection classifier for AgentGuard (ProtectAI DeBERTa-v3, Apache-2.0). Install alongside `agentguard` to upgrade the injection signal from the built-in heuristic baseline to the local ONNX model.",
+  "type": "module",
+  "main": "index.js",
+  "exports": { ".": "./index.js" },
+  "license": "Apache-2.0",
+  "keywords": ["agentguard", "prompt-injection", "onnx", "security"],
+  "dependencies": {
+    "@huggingface/transformers": "^3.0.0"
+  },
+  "peerDependencies": {
+    "agentguard": "*"
+  }
+}

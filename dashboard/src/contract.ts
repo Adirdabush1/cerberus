@@ -9,6 +9,23 @@
 export type ToolCategory = 'READ' | 'WRITE' | 'EXECUTE' | 'EGRESS' | 'UNKNOWN';
 export type PolicyAction = 'ALLOW' | 'BLOCK' | 'HITL';
 export type FinalAction = 'ALLOW' | 'BLOCK';
+export type SignalSource = 'policy' | 'behavioral' | 'content';
+export type RiskBand = 'ALLOW' | 'AUDIT' | 'HITL' | 'BLOCK';
+
+export interface RiskFactor {
+  source: SignalSource;
+  label: string;
+  points: number;
+  group: string;
+}
+
+export interface RiskAssessment {
+  score: number;
+  band: RiskBand;
+  version: string;
+  factors: RiskFactor[];
+  hardFloor: boolean;
+}
 
 export interface MCPToolCall {
   tool: string;
@@ -25,6 +42,8 @@ export interface SecurityViolation {
   reason: string;
   createdAt: number;
   ttlMs: number;
+  signal: SignalSource;
+  risk?: RiskAssessment;
 }
 
 export interface AuditEntry {
@@ -35,6 +54,8 @@ export interface AuditEntry {
   ruleId: string | null;
   reason: string;
   viaHitl: boolean;
+  signal: SignalSource;
+  risk?: RiskAssessment;
 }
 
 export type ServerToDashboard =

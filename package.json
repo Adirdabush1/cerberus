@@ -10,7 +10,15 @@
     "engine": "tsx src/cli/index.ts engine",
     "hook": "tsx src/cli/index.ts hook",
     "typecheck": "tsc --noEmit",
-    "build": "tsc"
+    "build": "tsc",
+    "test:behavioral": "tsx scripts/behavioral.test.ts",
+    "e2e:behavioral": "node scripts/behavioral-e2e.mjs",
+    "test:content": "tsx scripts/content.test.ts",
+    "e2e:content": "node scripts/content-e2e.mjs",
+    "test:injection": "tsx scripts/injection.test.ts",
+    "e2e:injection": "node scripts/injection-e2e.mjs",
+    "test:risk": "tsx scripts/risk.test.ts",
+    "e2e:risk": "node scripts/risk-e2e.mjs"
   },
   "dependencies": {
     "js-yaml": "^4.1.0",
