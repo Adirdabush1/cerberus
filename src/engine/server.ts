@@ -13,6 +13,7 @@
  * The open HTTP socket itself is the synchronous hold. No polling, no Redis.
  */
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
+import { spawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { existsSync, readFileSync, statSync } from 'node:fs';
 import { extname, join, normalize, sep } from 'node:path';
@@ -42,7 +43,7 @@ import type {
   HitlResolution,
   InspectRequest,
   MCPToolCall,
-  PipelineResult,
+  RiskBand,
   SecurityViolation,
   ServerToDashboard,
   SessionEvent,
@@ -59,7 +60,13 @@ export interface EngineOptions {
   weightsPath: string;
   /** If set, serve the built dashboard (static files) from this dir at `/` (D20). */
   staticDir?: string;
+  /** Auto-open the investigation UI on severe verdicts (M4-C, D39). 'block' ⇒ on BLOCK/EXFIL; 'off' ⇒ never. */
+  autoOpen?: 'block' | 'off';
+  /** Opener injection seam (tests pass a spy); defaults to the platform browser-opener. */
+  opener?: (url: string) => void;
 }
+
+const AUTO_OPEN_WINDOW_MS = 30_000; // don't reopen the same session's tab more than once per window
 
 export class Engine {
   private readonly policy: PolicyEngine;
@@ -68,6 +75,7 @@ export class Engine {
   private readonly risk: RiskEngine;
   private injection: InjectionClassifier = new DisabledInjectionClassifier();
   private readonly store = new InMemoryPendingStore();
+  private readonly lastOpened = new Map<string, number>(); // session → last auto-open ts (rate-limit)
   private readonly audit: AuditLog;
   private readonly clients = new Set<WebSocket>();
   private readonly http = createServer((req, res) => this.route(req, res));
@@ -176,7 +184,8 @@ export class Engine {
     // audit record carries risk.band='AUDIT' so it surfaces as elevated-risk on the dashboard.)
     if (action === 'ALLOW' || action === 'BLOCK') {
       this.writeAudit({ ...base, event: 'decision', action, reason, viaHitl: false });
-      return json(res, 200, finalResult(action, reason));
+      if (action === 'BLOCK') this.maybeAutoOpen(call.sessionId, risk.band);
+      return json(res, 200, { action, reason, band: risk.band, sessionId: call.sessionId });
     }
 
     // HITL: build a violation, hold the socket, and wait for a verdict.
@@ -213,7 +222,29 @@ export class Engine {
       resolution: resolutionOf(result.action, result.reason),
       latencyMs: Date.now() - violation.createdAt,
     });
-    if (!res.writableEnded) json(res, 200, result);
+    if (result.action === 'BLOCK') this.maybeAutoOpen(call.sessionId, risk.band);
+    if (!res.writableEnded) json(res, 200, { ...result, band: risk.band, sessionId: call.sessionId });
+  }
+
+  /**
+   * Auto-open the investigation UI on a severe verdict (M4-C, D39). Engine-side so it can dedup/rate-
+   * limit centrally — a burst of BLOCKs in one session opens at most one tab per window. Best-effort:
+   * a failed opener never affects enforcement.
+   */
+  private maybeAutoOpen(sessionId: string | undefined, band: RiskBand): void {
+    if ((this.opts.autoOpen ?? 'off') !== 'block') return;
+    if (band !== 'BLOCK') return; // BLOCK band covers exfil/injection blocks (their score florors here)
+    const sid = sessionId ?? 'default';
+    const now = Date.now();
+    const last = this.lastOpened.get(sid) ?? 0;
+    if (now - last < AUTO_OPEN_WINDOW_MS) return;
+    this.lastOpened.set(sid, now);
+    const url = `http://127.0.0.1:${this.opts.port}/?session=${encodeURIComponent(sid)}`;
+    try {
+      (this.opts.opener ?? defaultOpener)(url);
+    } catch {
+      /* best-effort */
+    }
   }
 
   /**
@@ -361,8 +392,11 @@ export class Engine {
 
 /* --------------------------------- helpers --------------------------------- */
 
-function finalResult(action: FinalAction, reason: string): PipelineResult {
-  return { action, reason };
+/** Open a URL in the user's default browser, cross-platform, detached (best-effort). */
+function defaultOpener(url: string): void {
+  const cmd = process.platform === 'darwin' ? 'open' : process.platform === 'win32' ? 'start' : 'xdg-open';
+  const child = spawn(cmd, [url], { stdio: 'ignore', detached: true, shell: process.platform === 'win32' });
+  child.unref();
 }
 
 /** Classify how a held call ended, from the store's verdict — for the hitl-resolved latency event (D23). */

@@ -113,7 +113,11 @@ function Tab({ active, onClick, children }: { active: boolean; onClick: () => vo
 
 export default function App() {
   const { connected, pending, audit, decide } = useEngine();
-  const [view, setView] = useState<View>('live');
+  // M4-C: a terminal alert may deep-link `?session=<id>` — land on the Sessions tab with it preselected.
+  const [initialSession] = useState(() =>
+    typeof window !== 'undefined' ? new URLSearchParams(window.location.search).get('session') ?? undefined : undefined,
+  );
+  const [view, setView] = useState<View>(initialSession ? 'sessions' : 'live');
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
     const t = setInterval(() => setNow(Date.now()), 1000);
@@ -143,7 +147,7 @@ export default function App() {
 
       <main className="p-6 max-w-7xl mx-auto">
         {view === 'sessions' ? (
-          <SessionsView audit={audit} now={now} />
+          <SessionsView audit={audit} now={now} initialSession={initialSession} />
         ) : (
           <div className="grid grid-cols-1 lg:grid-cols-[1fr_24rem] gap-6">
             {/* Action Center */}

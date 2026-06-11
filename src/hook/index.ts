@@ -13,6 +13,7 @@
  *              let the result through (there is nothing to fail closed).
  */
 import { request } from 'node:http';
+import { closeSync, openSync, writeSync } from 'node:fs';
 import type { InspectRequest, MCPToolCall, PipelineResult, SessionEvent } from '../contract/types.js';
 
 interface HookEvent {
@@ -30,6 +31,33 @@ interface HookEvent {
 const ENGINE_HOST = process.env.AG_ENGINE_HOST ?? '127.0.0.1';
 const ENGINE_PORT = Number(process.env.AG_ENGINE_PORT ?? 9000);
 const FAIL_OPEN = process.env.AG_FAIL_OPEN === '1';
+
+// M4-C terminal notifications. The hook runs in the agent's terminal, so its alerts reach the human
+// watching the agent. Gated by AG_NOTIFY (default on) and AG_APPROVAL_SURFACE (terminal|dashboard|both).
+const SURFACE = process.env.AG_APPROVAL_SURFACE ?? 'both';
+const TERMINAL_NOTIFY = process.env.AG_NOTIFY !== '0' && (SURFACE === 'terminal' || SURFACE === 'both');
+const HELD_NOTICE_MS = Number(process.env.AG_HELD_NOTICE_MS ?? 400); // a slower /intercept ⇒ it's held (D41)
+
+/**
+ * Notify the human in the terminal. stdout is the Claude Code protocol channel (D35), so we write to
+ * the controlling terminal `/dev/tty` directly — falling back to stderr if it isn't writable (which is
+ * the bit to live-verify inside real Claude Code).
+ */
+function notify(line: string): void {
+  if (!TERMINAL_NOTIFY) return;
+  const msg = line.endsWith('\n') ? line : line + '\n';
+  try {
+    const fd = openSync('/dev/tty', 'a');
+    writeSync(fd, msg);
+    closeSync(fd);
+  } catch {
+    process.stderr.write(msg);
+  }
+}
+
+function sessionLink(sessionId?: string): string {
+  return sessionId ? `  ·  http://${ENGINE_HOST}:${ENGINE_PORT}/?session=${encodeURIComponent(sessionId)}` : '';
+}
 
 function emitPre(decision: 'allow' | 'deny', reason: string): never {
   process.stdout.write(
@@ -94,10 +122,28 @@ async function handlePre(event: HookEvent): Promise<never> {
     sessionId: event.session_id,
     cwd: event.cwd,
   };
+
+  // If /intercept is slow to answer, the call is being HELD — tell the human so the agent isn't just
+  // silently hung (D41). The specific id isn't known yet, so point at `agentguard pending`.
+  let held = false;
+  const heldTimer = setTimeout(() => {
+    held = true;
+    notify(`⏸ AgentGuard HELD ${call.tool} — awaiting approval.\n   review: agentguard pending${sessionLink(call.sessionId)}`);
+  }, HELD_NOTICE_MS);
+
   try {
     const result = await post<PipelineResult>('/intercept', call);
+    clearTimeout(heldTimer);
+    if (held) {
+      // a held call that resolved — report the outcome
+      notify(result.action === 'ALLOW' ? `✓ AgentGuard: approved ${call.tool}` : `⛔ AgentGuard: denied ${call.tool}`);
+    } else if (result.action === 'BLOCK') {
+      // an immediate auto-block (the headline alert)
+      notify(`⛔ AgentGuard BLOCKED ${call.tool} · ${result.reason}${sessionLink(result.sessionId ?? call.sessionId)}`);
+    } // auto ALLOW / AUDIT → silent in the terminal (D36)
     emitPre(result.action === 'ALLOW' ? 'allow' : 'deny', result.reason);
   } catch (err) {
+    clearTimeout(heldTimer);
     const why = `AgentGuard engine unreachable at ${ENGINE_HOST}:${ENGINE_PORT} (${(err as Error).message}).`;
     if (FAIL_OPEN) emitPre('allow', `${why} AG_FAIL_OPEN=1 → allowing.`);
     emitPre('deny', `${why} Start it with \`agentguard engine\`, or set AG_FAIL_OPEN=1. Failing closed.`);
@@ -117,7 +163,11 @@ async function handlePost(event: HookEvent): Promise<never> {
     ...(err !== undefined && err !== null ? { error: typeof err === 'string' ? err : JSON.stringify(err) } : {}),
   };
   try {
-    await post('/inspect', body);
+    const resp = await post<{ tainted?: boolean; secretTypes?: string[]; injectionFlagged?: boolean }>('/inspect', body);
+    // Observe-only notices (D36): a secret entering context or an injection in the result arms the
+    // exfil gate for the NEXT egress — surface it now so the human has context before that happens.
+    if (resp.tainted) notify(`⚠ AgentGuard: secret loaded into context via ${body.tool}${resp.secretTypes?.length ? ` (${resp.secretTypes.join(', ')})` : ''}${sessionLink(body.sessionId)}`);
+    if (resp.injectionFlagged) notify(`⚠ AgentGuard: prompt-injection detected in ${body.tool} result — outbound calls now gated.${sessionLink(body.sessionId)}`);
   } catch {
     /* best-effort: PostToolUse cannot block, so a missing engine just means no taint update. */
   }
