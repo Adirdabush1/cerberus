@@ -1,34 +1,8 @@
 import { useEffect, useState } from 'react';
 import { useEngine } from './useEngine';
-import type { AuditEntry, MCPToolCall, SecurityViolation, ToolCategory } from './contract';
-
-const CATEGORY_STYLE: Record<ToolCategory, string> = {
-  READ: 'bg-sky-500/15 text-sky-300 ring-sky-500/30',
-  WRITE: 'bg-amber-500/15 text-amber-300 ring-amber-500/30',
-  EXECUTE: 'bg-fuchsia-500/15 text-fuchsia-300 ring-fuchsia-500/30',
-  EGRESS: 'bg-orange-500/15 text-orange-300 ring-orange-500/30',
-  UNKNOWN: 'bg-red-500/15 text-red-300 ring-red-500/30',
-};
-
-/** Turn a raw tool call into a human-readable "what the agent wants to do". */
-function describe(call: MCPToolCall): { title: string; body: string | null } {
-  const i = call.input ?? {};
-  if (typeof i['command'] === 'string') return { title: `$ ${i['command']}`, body: null };
-  const path = (i['file_path'] ?? i['path']) as string | undefined;
-  if (typeof path === 'string') {
-    const content = (i['content'] ?? i['new_string'] ?? '') as unknown;
-    return { title: `${call.tool} → ${path}`, body: typeof content === 'string' && content ? content : null };
-  }
-  if (typeof i['url'] === 'string') return { title: `${call.tool} → ${i['url']}`, body: null };
-  const keys = Object.keys(i);
-  return { title: call.tool, body: keys.length ? JSON.stringify(i, null, 2) : null };
-}
-
-function ago(ts: number, now: number): string {
-  const s = Math.max(0, Math.round((now - ts) / 1000));
-  if (s < 60) return `${s}s ago`;
-  return `${Math.floor(s / 60)}m ${s % 60}s ago`;
-}
+import { SessionsView } from './SessionsView';
+import { CATEGORY_STYLE, EVENT_META, ago, describe } from './format';
+import type { AuditEntry, SecurityViolation } from './contract';
 
 function ViolationCard({
   v,
@@ -98,35 +72,48 @@ function ViolationCard({
   );
 }
 
+/** One row of the Live Stream — now event-aware (the log carries lifecycle events, not just decisions). */
 function AuditRow({ e, now }: { e: AuditEntry; now: number }) {
+  const meta = EVENT_META[e.event];
   const allow = e.action === 'ALLOW';
   return (
     <div className="flex items-center gap-2 px-3 py-1.5 text-xs border-b border-white/5">
-      <span className={`font-mono font-semibold ${allow ? 'text-emerald-400' : 'text-red-400'}`}>
-        {allow ? 'ALLOW' : 'BLOCK'}
-      </span>
+      <span className="shrink-0" title={meta.label}>{meta.icon}</span>
+      {e.action && (
+        <span className={`font-mono font-semibold ${allow ? 'text-emerald-400' : 'text-red-400'}`}>{e.action}</span>
+      )}
       {e.viaHitl && <span className="text-[10px] px-1 rounded bg-amber-500/15 text-amber-300">HITL</span>}
-      {e.signal === 'behavioral' && (
-        <span className="text-[10px] px-1 rounded bg-red-500/15 text-red-300">ANOMALY</span>
-      )}
-      {e.signal === 'content' && (
-        <span className="text-[10px] px-1 rounded bg-red-500/15 text-red-300">EXFIL</span>
-      )}
-      {e.risk?.band === 'AUDIT' && (
-        <span className="text-[10px] px-1 rounded bg-amber-500/15 text-amber-300">AUDIT</span>
-      )}
+      {e.signal === 'behavioral' && <span className="text-[10px] px-1 rounded bg-red-500/15 text-red-300">ANOMALY</span>}
+      {e.signal === 'content' && <span className="text-[10px] px-1 rounded bg-red-500/15 text-red-300">EXFIL</span>}
+      {e.risk?.band === 'AUDIT' && <span className="text-[10px] px-1 rounded bg-amber-500/15 text-amber-300">AUDIT</span>}
       {e.risk && e.risk.score > 0 && (
         <span className="text-[10px] tabular-nums text-slate-500" title={`band ${e.risk.band} · ${e.risk.version}`}>⚖{e.risk.score}</span>
       )}
-      <span className="text-slate-300 truncate">{e.tool}</span>
+      <span className="text-slate-300 truncate">{e.tool ?? meta.label}</span>
       <span className="text-slate-500 truncate flex-1">{e.ruleId ?? e.reason}</span>
       <span className="text-slate-600 tabular-nums shrink-0">{ago(e.ts, now)}</span>
     </div>
   );
 }
 
+type View = 'live' | 'sessions';
+
+function Tab({ active, onClick, children }: { active: boolean; onClick: () => void; children: React.ReactNode }) {
+  return (
+    <button
+      onClick={onClick}
+      className={`text-xs font-semibold px-3 py-1.5 rounded-lg transition ${
+        active ? 'bg-white/10 text-slate-100' : 'text-slate-400 hover:text-slate-200'
+      }`}
+    >
+      {children}
+    </button>
+  );
+}
+
 export default function App() {
   const { connected, pending, audit, decide } = useEngine();
+  const [view, setView] = useState<View>('live');
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
     const t = setInterval(() => setNow(Date.now()), 1000);
@@ -139,52 +126,59 @@ export default function App() {
         <div className="text-lg font-bold tracking-tight">
           🛡️ Agent<span className="text-emerald-400">Guard</span>
         </div>
-        <span className="text-xs text-slate-500">Agent Permission Gateway</span>
+        <nav className="flex items-center gap-1 ml-2">
+          <Tab active={view === 'live'} onClick={() => setView('live')}>Live</Tab>
+          <Tab active={view === 'sessions'} onClick={() => setView('sessions')}>Sessions</Tab>
+        </nav>
+        {view === 'live' && pending.length > 0 && (
+          <span className="text-[11px] px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-300 font-semibold animate-pulse">
+            {pending.length} awaiting approval
+          </span>
+        )}
         <div className="ml-auto flex items-center gap-2 text-xs">
           <span className={`h-2 w-2 rounded-full ${connected ? 'bg-emerald-400' : 'bg-red-500 animate-pulse'}`} />
           <span className="text-slate-400">{connected ? 'Engine connected' : 'Engine offline'}</span>
         </div>
       </header>
 
-      <main className="grid grid-cols-1 lg:grid-cols-[1fr_24rem] gap-6 p-6 max-w-7xl mx-auto">
-        {/* Action Center */}
-        <section>
-          <div className="flex items-center gap-2 mb-3">
-            <h2 className="text-sm font-semibold uppercase tracking-wider text-slate-400">Action Center</h2>
-            {pending.length > 0 && (
-              <span className="text-[11px] px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-300 font-semibold animate-pulse">
-                {pending.length} awaiting approval
-              </span>
-            )}
-          </div>
-          {pending.length === 0 ? (
-            <div className="rounded-xl border border-dashed border-white/10 p-10 text-center text-slate-500 text-sm">
-              No actions awaiting approval. The agent is running freely within policy.
-            </div>
-          ) : (
-            <div className="grid gap-3 sm:grid-cols-2">
-              {pending.map((v) => (
-                <ViolationCard key={v.id} v={v} now={now} onDecide={decide} />
-              ))}
-            </div>
-          )}
-        </section>
+      <main className="p-6 max-w-7xl mx-auto">
+        {view === 'sessions' ? (
+          <SessionsView audit={audit} now={now} />
+        ) : (
+          <div className="grid grid-cols-1 lg:grid-cols-[1fr_24rem] gap-6">
+            {/* Action Center */}
+            <section>
+              <h2 className="text-sm font-semibold uppercase tracking-wider text-slate-400 mb-3">Action Center</h2>
+              {pending.length === 0 ? (
+                <div className="rounded-xl border border-dashed border-white/10 p-10 text-center text-slate-500 text-sm">
+                  No actions awaiting approval. The agent is running freely within policy.
+                </div>
+              ) : (
+                <div className="grid gap-3 sm:grid-cols-2">
+                  {pending.map((v) => (
+                    <ViolationCard key={v.id} v={v} now={now} onDecide={decide} />
+                  ))}
+                </div>
+              )}
+            </section>
 
-        {/* Live Stream */}
-        <section>
-          <h2 className="text-sm font-semibold uppercase tracking-wider text-slate-400 mb-3">Live Stream</h2>
-          <div className="rounded-xl border border-white/10 bg-slate-900/50 overflow-hidden">
-            {audit.length === 0 ? (
-              <div className="p-6 text-center text-slate-600 text-sm">Decisions will stream here in real time.</div>
-            ) : (
-              <div className="max-h-[70vh] overflow-auto">
-                {audit.map((e, idx) => (
-                  <AuditRow key={`${e.ts}-${idx}`} e={e} now={now} />
-                ))}
+            {/* Live Stream */}
+            <section>
+              <h2 className="text-sm font-semibold uppercase tracking-wider text-slate-400 mb-3">Live Stream</h2>
+              <div className="rounded-xl border border-white/10 bg-slate-900/50 overflow-hidden">
+                {audit.length === 0 ? (
+                  <div className="p-6 text-center text-slate-600 text-sm">Decisions will stream here in real time.</div>
+                ) : (
+                  <div className="max-h-[70vh] overflow-auto">
+                    {audit.map((e, idx) => (
+                      <AuditRow key={`${e.ts}-${idx}`} e={e} now={now} />
+                    ))}
+                  </div>
+                )}
               </div>
-            )}
+            </section>
           </div>
-        </section>
+        )}
       </main>
     </div>
   );

@@ -89,6 +89,18 @@ export interface InspectRequest {
   input: Record<string, unknown>;
   sessionId?: string;
   toolResponse: string;
+  /** Present when the tool FAILED (PostToolUse error payload) — the engine emits a `tool-failed` event. */
+  error?: string;
+}
+
+/**
+ * SessionStart / SessionEnd hook → Engine `/session`. Observability-only: bookends the session
+ * timeline and (on 'ended') lets the engine reset per-session monitor state (D23).
+ */
+export interface SessionEvent {
+  event: 'started' | 'ended';
+  sessionId: string;
+  source?: string; // SessionStart `source` (startup | resume | clear), if provided
 }
 
 /** The final, binary verdict returned to the hook (and thus to the agent). */
@@ -98,17 +110,90 @@ export interface PipelineResult {
   violationId?: string;
 }
 
-/** One line in the local audit log. */
+/**
+ * The kind of fact a single audit record captures (D23). The audit log is the single source of truth
+ * (D22); the investigation timeline is a PROJECTION over these events. We EMIT observed facts (these
+ * types) and DERIVE interpretations (e.g. risk-band transitions) in the projection — never as events.
+ */
+export type AuditEvent =
+  | 'decision' //           an auto ALLOW/BLOCK verdict on an intercepted call (viaHitl=false)
+  | 'hitl-opened' //        a call was held for human review (no verdict yet)
+  | 'hitl-resolved' //      a held call left the pending set (approved | rejected | expired)
+  | 'session-started' //    a Claude Code session began (SessionStart hook)
+  | 'session-ended' //      a Claude Code session ended (SessionEnd hook) — also resets monitors
+  | 'taint-loaded' //       a secret entered the agent's context (arms the exfil gate)
+  | 'injection-detected' // prompt-injection found in a tool result (raises session posture)
+  | 'tool-failed'; //       an executed tool returned an error instead of a result
+
+/** How a held call was resolved (D23). Drives the latency metric (resolved.ts − opened.ts). */
+export type HitlResolution = 'approved' | 'rejected' | 'expired';
+
+/**
+ * One line in the local audit log — a single observed event (D22/D23). `event`, `ts` (and `reason`
+ * for the human-readable "what happened") are always present; the rest are populated per event kind:
+ * decision/hitl-* carry the tool-call fields; session-* carry only session identity; resolution and
+ * latencyMs are hitl-resolved-only; secretTypes/injectionScore tag the content events.
+ */
 export interface AuditEntry {
+  event: AuditEvent;
   ts: number;
-  tool: string;
-  category: ToolCategory;
-  action: FinalAction;
-  ruleId: string | null;
   reason: string;
-  viaHitl: boolean;
-  signal: SignalSource;
+  sessionId?: string; //    session grouping for the timeline (D24)
+  requestId?: string; //    per-/intercept id; links decision ↔ hitl-opened ↔ hitl-resolved (D24)
+  tool?: string;
+  input?: Record<string, unknown>; // the tool-call args (decision/hitl events) — powers the timeline diff
+  category?: ToolCategory;
+  action?: FinalAction; //  decision + hitl-resolved
+  ruleId?: string | null;
+  viaHitl?: boolean;
+  signal?: SignalSource;
   risk?: RiskAssessment;
+  resolution?: HitlResolution; // hitl-resolved only
+  latencyMs?: number; //        hitl-resolved only
+  secretTypes?: string[]; //    taint-loaded only
+  injectionScore?: number; //   injection-detected only
+}
+
+/**
+ * A per-session rollup for the investigation view (D22 — derived by PROJECTING the audit log, never
+ * stored as its own record). One row per Claude Code session, newest activity first.
+ */
+export interface SessionSummary {
+  sessionId: string;
+  firstTs: number;
+  lastTs: number;
+  startedAt?: number; //  ts of the session-started event, if one was observed
+  endedAt?: number; //    ts of the session-ended event, if the session has closed
+  verdicts: number; //    decisions + resolved holds (calls that got an ALLOW/BLOCK)
+  allowed: number;
+  blocked: number;
+  held: number; //        calls that were paused for human review (hitl-opened)
+  taintLoaded: number; // secrets that entered context
+  injections: number; //  prompt-injections detected in tool results
+  toolFailures: number;
+  peakRiskScore: number;
+  peakBand: RiskBand;
+  signals: SignalSource[]; // distinct defense lines that fired this session
+  drivers: string[]; //      friendly names of the risk factors that drove this session's risk, hottest first
+}
+
+/**
+ * One row of the correlated timeline. A held call's `hitl-opened` and `hitl-resolved` (same
+ * `requestId`) collapse into a single item — `primary` is the opened event, `resolvedBy` the verdict —
+ * so the UI shows one row ("held → BLOCK, rejected · 1.2s") instead of two. Every other event is a
+ * standalone item (`resolvedBy` undefined).
+ */
+export interface TimelineItem {
+  primary: AuditEntry;
+  resolvedBy?: AuditEntry;
+}
+
+/** `GET /sessions/:id/timeline` response — the rollup, the raw events, and the correlated items. */
+export interface SessionTimeline {
+  sessionId: string;
+  summary: SessionSummary;
+  events: AuditEntry[]; //   ascending by ts — the raw projection
+  items: TimelineItem[]; //  correlated (open+resolve folded) — what the UI renders
 }
 
 /* ----------------------------- WebSocket contract ----------------------------- */

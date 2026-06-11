@@ -11,14 +11,19 @@ import { dirname, join } from 'node:path';
 
 const PACKAGE_ROOT = process.env.AG_HOME ?? process.cwd();
 const BIN = join(PACKAGE_ROOT, 'bin', 'agentguard.mjs');
-const HOOK_TIMEOUTS = { PreToolUse: 310, PostToolUse: 10 } as const; // Pre ≥ engine TTL; Post is short.
+// Pre ≥ engine TTL (it holds the socket); the others are quick fire-and-acknowledge posts.
+const HOOK_TIMEOUTS = { PreToolUse: 310, PostToolUse: 10, SessionStart: 10, SessionEnd: 10 } as const;
+// Tool-scoped events match by tool (`*`); session lifecycle events are not tool-scoped (no matcher).
+const TOOL_EVENTS = new Set<keyof typeof HOOK_TIMEOUTS>(['PreToolUse', 'PostToolUse']);
+const HOOK_EVENTS = Object.keys(HOOK_TIMEOUTS) as (keyof typeof HOOK_TIMEOUTS)[];
 
 interface HookCmd { type: 'command'; command: string; timeout?: number }
 interface HookGroup { matcher?: string; hooks?: HookCmd[] }
 interface Settings { hooks?: Record<string, HookGroup[]>; [k: string]: unknown }
 
 function hookGroup(event: keyof typeof HOOK_TIMEOUTS): HookGroup {
-  return { matcher: '*', hooks: [{ type: 'command', command: `node ${BIN} hook`, timeout: HOOK_TIMEOUTS[event] }] };
+  const hooks: HookCmd[] = [{ type: 'command', command: `node ${BIN} hook`, timeout: HOOK_TIMEOUTS[event] }];
+  return TOOL_EVENTS.has(event) ? { matcher: '*', hooks } : { hooks };
 }
 
 /** True if this event already has an AgentGuard hook (idempotency). */
@@ -34,7 +39,7 @@ export function runInit(argv: string[]): void {
     : join(process.cwd(), '.claude', 'settings.json');
 
   if (printOnly) {
-    const snippet = { hooks: { PreToolUse: [hookGroup('PreToolUse')], PostToolUse: [hookGroup('PostToolUse')] } };
+    const snippet = { hooks: Object.fromEntries(HOOK_EVENTS.map((e) => [e, [hookGroup(e)]])) };
     process.stdout.write(
       `Add this to ${settingsPath} (merge into any existing "hooks"):\n\n${JSON.stringify(snippet, null, 2)}\n\n` +
         `Then run \`agentguard engine\` and open the dashboard.\n`,
@@ -49,7 +54,7 @@ export function runInit(argv: string[]): void {
 
   let added = 0;
   let unchanged = 0;
-  for (const event of ['PreToolUse', 'PostToolUse'] as const) {
+  for (const event of HOOK_EVENTS) {
     const groups = (settings.hooks[event] ??= []);
     if (!Array.isArray(groups)) {
       process.stderr.write(`AgentGuard: unexpected ${event} shape in ${settingsPath}; leaving it untouched.\n`);

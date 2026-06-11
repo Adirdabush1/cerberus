@@ -13,14 +13,17 @@
  *              let the result through (there is nothing to fail closed).
  */
 import { request } from 'node:http';
-import type { InspectRequest, MCPToolCall, PipelineResult } from '../contract/types.js';
+import type { InspectRequest, MCPToolCall, PipelineResult, SessionEvent } from '../contract/types.js';
 
 interface HookEvent {
   hook_event_name?: string;
   tool_name?: string;
   tool_input?: Record<string, unknown>;
   tool_response?: unknown;
+  tool_output?: unknown; //  some Claude Code versions/docs name the result field this way
+  error?: unknown; //        present when the tool FAILED instead of returning a result
   session_id?: string;
+  source?: string; //        SessionStart: startup | resume | clear
   cwd?: string;
 }
 
@@ -102,12 +105,16 @@ async function handlePre(event: HookEvent): Promise<never> {
 }
 
 async function handlePost(event: HookEvent): Promise<never> {
-  const tr = event.tool_response;
+  // Be tolerant of the result field name across Claude Code versions (robustness flag): the result
+  // may arrive as tool_response or tool_output, or be absent on a failure that carries `error`.
+  const tr = event.tool_response ?? event.tool_output;
+  const err = event.error;
   const body: InspectRequest = {
     tool: event.tool_name ?? 'unknown',
     input: event.tool_input ?? {},
     sessionId: event.session_id,
     toolResponse: typeof tr === 'string' ? tr : JSON.stringify(tr ?? ''),
+    ...(err !== undefined && err !== null ? { error: typeof err === 'string' ? err : JSON.stringify(err) } : {}),
   };
   try {
     await post('/inspect', body);
@@ -115,6 +122,18 @@ async function handlePost(event: HookEvent): Promise<never> {
     /* best-effort: PostToolUse cannot block, so a missing engine just means no taint update. */
   }
   emitPost();
+}
+
+/** SessionStart / SessionEnd — observability-only; bookends the timeline and resets monitors on end. */
+async function handleSession(event: HookEvent, kind: 'started' | 'ended'): Promise<never> {
+  const body: SessionEvent = { event: kind, sessionId: event.session_id ?? 'default', source: event.source };
+  try {
+    await post('/session', body);
+  } catch {
+    /* best-effort: session bookkeeping never blocks the agent. */
+  }
+  process.stdout.write('{}');
+  process.exit(0);
 }
 
 async function main(): Promise<void> {
@@ -126,7 +145,15 @@ async function main(): Promise<void> {
     /* malformed event */
   }
 
-  const isPost = event.hook_event_name === 'PostToolUse' || event.tool_response !== undefined;
+  const name = event.hook_event_name;
+  if (name === 'SessionStart') return void (await handleSession(event, 'started'));
+  if (name === 'SessionEnd') return void (await handleSession(event, 'ended'));
+
+  const isPost =
+    name === 'PostToolUse' ||
+    event.tool_response !== undefined ||
+    event.tool_output !== undefined ||
+    event.error !== undefined;
   if (isPost) return void (await handlePost(event));
   return void (await handlePre(event));
 }
