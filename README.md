@@ -27,8 +27,38 @@ agentguard init                 # project-level   (--global for ~/.claude, --pri
 agentguard engine               # then open http://127.0.0.1:9000/
 ```
 
-Use Claude Code as usual — tool calls now route through AgentGuard. Dangerous ones pause in the
-dashboard with an exact diff; Approve/Deny from there.
+Use Claude Code as usual — tool calls now route through AgentGuard. A blocked or held call is
+announced **in your terminal**; resolve a held call from the terminal or the dashboard:
+
+```bash
+agentguard pending              # list calls held for review (with their ids)
+agentguard approve <id>         # release a held call …
+agentguard deny <id>            # … or deny it
+```
+
+The dashboard (`http://127.0.0.1:9000/`) has a **Live** tab (Action Center + stream) and a
+**Sessions** tab — a forensic timeline per session with a risk-factor breakdown and a **Replay**
+player to step through how a session's risk built up.
+
+## Terminal-first alerts & approvals
+AgentGuard runs *inside* the agent's execution loop, so the terminal is the realtime decision point
+and the dashboard is the deep dive. Per severity:
+
+| verdict | terminal | web UI |
+|---|---|---|
+| **BLOCK** | ⛔ alert + session link | optional auto-open |
+| **HITL** (held) | ⏸ notice → `agentguard pending` + link | reachable via the link |
+| **AUDIT** | — (quiet) | elevated-risk record |
+| **ALLOW** | — (silent) | — |
+
+Alerts write to the controlling terminal (`/dev/tty`, falling back to stderr) so the protocol channel
+to Claude Code stays clean. Tune via env:
+
+| env | default | effect |
+|---|---|---|
+| `AG_NOTIFY` | `1` | terminal notifications on/off (`0` to silence) |
+| `AG_APPROVAL_SURFACE` | `both` | `terminal` · `dashboard` · `both` |
+| `AG_AUTO_OPEN` | `off` | `block` ⇒ auto-open the investigation UI on a BLOCK/EXFIL |
 
 ## How it plugs in
 - **PreToolUse hook → `/intercept`** is the single hard enforcement point (allow/deny; HITL holds the
@@ -56,7 +86,8 @@ the built-in heuristic classifier; install it only if you want it. The core is O
 ```bash
 npm run engine            # run from source via tsx (dev)
 npm run typecheck
-npm run test:behavioral && npm run test:content && npm run test:injection && npm run test:risk && npm run test:init
+npm run test:behavioral && npm run test:content && npm run test:injection && npm run test:risk \
+  && npm run test:init && npm run test:projector && npm run test:audit && npm run test:notify
 npm run e2e:behavioral && npm run e2e:content && npm run e2e:injection && npm run e2e:risk
 ```
 See `PLAN.md` for milestones and `brainstorms/` for the design records behind each decision.
