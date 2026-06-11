@@ -31,7 +31,8 @@
     "e2e:risk": "node scripts/risk-e2e.mjs",
     "test:init": "tsx scripts/init.test.ts",
     "test:projector": "tsx scripts/projector.test.ts",
-    "test:audit": "tsx scripts/audit.test.ts"
+    "test:audit": "tsx scripts/audit.test.ts",
+    "test:notify": "tsx scripts/notify.test.ts"
   },
   "dependencies": {
     "js-yaml": "^4.1.0",

@@ -45,7 +45,9 @@ async function runEngine(): Promise<void> {
   const dashboardDist = join(PROJECT_ROOT, 'dashboard', 'dist');
   const staticDir = existsSync(join(dashboardDist, 'index.html')) ? dashboardDist : undefined;
 
-  const engine = new Engine({ port, rulesPath, auditFile, ttlMs, behavioral, content, injection, weightsPath, staticDir });
+  const autoOpen = process.env.AG_AUTO_OPEN === 'block' ? 'block' : 'off'; // M4-C D39 — default off
+
+  const engine = new Engine({ port, rulesPath, auditFile, ttlMs, behavioral, content, injection, weightsPath, staticDir, autoOpen });
   await engine.listen();
   process.stderr.write(
     `AgentGuard engine listening on :${port}\n` +
@@ -54,8 +56,53 @@ async function runEngine(): Promise<void> {
       `  content: secret-scan ${content.scanLimitBytes}B/result, path-risk TTL ${content.pathRiskTtlMs}ms → exfil HITL\n` +
       `  injection: classifier=${engine.injectionClassifier} (threshold ${injection.threshold}) → posture HITL on egress\n` +
       `  risk: ${weightsPath} (${engine.riskVersion}) → ALLOW/AUDIT/HITL/BLOCK bands\n` +
+      `  auto-open: ${autoOpen === 'block' ? 'on BLOCK/EXFIL' : 'off (set AG_AUTO_OPEN=block)'}\n` +
       `  dashboard: ${staticDir ? `http://127.0.0.1:${port}/` : '(not built — run `npm run build`)'}  ·  WS ws://127.0.0.1:${port}/ws\n`,
   );
+}
+
+/** Fetch against the local engine using the same host/port env the hook uses. */
+function engineFetch(path: string, init?: RequestInit): Promise<Response> {
+  const host = process.env.AG_ENGINE_HOST ?? '127.0.0.1';
+  const port = Number(process.env.AG_ENGINE_PORT ?? process.env.AG_PORT ?? 9000);
+  return fetch(`http://${host}:${port}${path}`, { headers: { 'content-type': 'application/json' }, ...init });
+}
+
+/** `agentguard approve|deny <id>` — the terminal approval channel (M4-C, D34). */
+async function runDecision(action: 'ALLOW' | 'BLOCK', id: string | undefined): Promise<void> {
+  if (!id) {
+    process.stderr.write(`usage: agentguard ${action === 'ALLOW' ? 'approve' : 'deny'} <violation-id>   (list ids with \`agentguard pending\`)\n`);
+    process.exit(1);
+  }
+  const r = await engineFetch('/decision', { method: 'POST', body: JSON.stringify({ type: 'decision', violationId: id, action }) });
+  if (r.ok) process.stdout.write(`${action === 'ALLOW' ? '✓ approved' : '⛔ denied'} ${id}\n`);
+  else {
+    process.stderr.write(`AgentGuard: decision failed (${r.status}). Is the engine running, and is the id still pending?\n`);
+    process.exit(1);
+  }
+}
+
+/** `agentguard pending` — list calls currently held for review, with their ids (M4-C, D41). */
+async function runPending(): Promise<void> {
+  let r: Response;
+  try {
+    r = await engineFetch('/pending');
+  } catch {
+    process.stderr.write('AgentGuard: cannot reach the engine. Start it with `agentguard engine`.\n');
+    process.exit(1);
+  }
+  if (!r.ok) { process.stderr.write(`AgentGuard: /pending returned ${r.status}.\n`); process.exit(1); }
+  const { pending } = (await r.json()) as {
+    pending: { id: string; toolCall: { tool: string }; reason: string; risk?: { score: number } }[];
+  };
+  if (pending.length === 0) { process.stdout.write('No calls awaiting approval.\n'); return; }
+  process.stdout.write(`${pending.length} awaiting approval:\n`);
+  for (const v of pending) {
+    process.stdout.write(
+      `  ${v.id}  ${v.toolCall.tool}${v.risk ? ` · risk=${v.risk.score}` : ''}\n    ${v.reason}\n` +
+        `    → agentguard approve ${v.id}    ·    agentguard deny ${v.id}\n`,
+    );
+  }
 }
 
 async function main(): Promise<void> {
@@ -69,11 +116,16 @@ async function main(): Promise<void> {
     const { runInit } = await import('./init.js');
     return runInit(process.argv.slice(3));
   }
+  if (cmd === 'approve') return runDecision('ALLOW', process.argv[3]);
+  if (cmd === 'deny') return runDecision('BLOCK', process.argv[3]);
+  if (cmd === 'pending') return runPending();
   process.stderr.write(
     'usage: agentguard <command>\n\n' +
       '  init [--global] [--print]   wire the Pre/PostToolUse hooks into .claude/settings.json\n' +
       '  engine                      start the gateway (HTTP hold + WS) and serve the dashboard\n' +
-      '  hook                        the Claude Code hook entry (spawned per tool call)\n',
+      '  hook                        the Claude Code hook entry (spawned per tool call)\n' +
+      '  pending                     list calls held for review (with their ids)\n' +
+      '  approve <id> | deny <id>    resolve a held call from the terminal\n',
   );
   process.exit(1);
 }

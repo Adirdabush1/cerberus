@@ -108,6 +108,8 @@ export interface PipelineResult {
   action: FinalAction;
   reason: string;
   violationId?: string;
+  band?: RiskBand; //   severity for the hook's terminal notification (M4-C); absent ⇒ treat as ALLOW
+  sessionId?: string; // echoed back so the hook can build the `?session=<id>` UI link
 }
 
 /**

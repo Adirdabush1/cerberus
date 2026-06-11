@@ -21,9 +21,9 @@ function eventKey(e: AuditEntry): string {
   return `${e.ts}|${e.event}|${e.requestId ?? ''}|${e.tool ?? ''}|${e.action ?? ''}`;
 }
 
-export function SessionsView({ audit, now }: { audit: AuditEntry[]; now: number }) {
+export function SessionsView({ audit, now, initialSession }: { audit: AuditEntry[]; now: number; initialSession?: string }) {
   const [sessions, setSessions] = useState<SessionSummary[]>([]);
-  const [selected, setSelected] = useState<string | null>(null);
+  const [selected, setSelected] = useState<string | null>(initialSession ?? null);
   const [history, setHistory] = useState<AuditEntry[]>([]);
   const [listQuery, setListQuery] = useState('');
   const [error, setError] = useState<string | null>(null);
