@@ -38,16 +38,19 @@ const SURFACE = process.env.AG_APPROVAL_SURFACE ?? 'both';
 const TERMINAL_NOTIFY = process.env.AG_NOTIFY !== '0' && (SURFACE === 'terminal' || SURFACE === 'both');
 const HELD_NOTICE_MS = Number(process.env.AG_HELD_NOTICE_MS ?? 400); // a slower /intercept ⇒ it's held (D41)
 
+// The controlling-terminal device: `\\.\CON` on Windows, `/dev/tty` on POSIX.
+const TTY_DEVICE = process.platform === 'win32' ? '\\\\.\\CON' : '/dev/tty';
+
 /**
  * Notify the human in the terminal. stdout is the Claude Code protocol channel (D35), so we write to
- * the controlling terminal `/dev/tty` directly — falling back to stderr if it isn't writable (which is
- * the bit to live-verify inside real Claude Code).
+ * the controlling terminal directly — falling back to stderr if the device isn't writable (which is
+ * the bit to live-verify inside real Claude Code, on both platforms).
  */
 function notify(line: string): void {
   if (!TERMINAL_NOTIFY) return;
   const msg = line.endsWith('\n') ? line : line + '\n';
   try {
-    const fd = openSync('/dev/tty', 'a');
+    const fd = openSync(TTY_DEVICE, 'a');
     writeSync(fd, msg);
     closeSync(fd);
   } catch {

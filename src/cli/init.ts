@@ -22,7 +22,8 @@ interface HookGroup { matcher?: string; hooks?: HookCmd[] }
 interface Settings { hooks?: Record<string, HookGroup[]>; [k: string]: unknown }
 
 function hookGroup(event: keyof typeof HOOK_TIMEOUTS): HookGroup {
-  const hooks: HookCmd[] = [{ type: 'command', command: `node ${BIN} hook`, timeout: HOOK_TIMEOUTS[event] }];
+  // Quote the path so a Windows install dir with spaces (C:\Users\First Last\…) still runs.
+  const hooks: HookCmd[] = [{ type: 'command', command: `node "${BIN}" hook`, timeout: HOOK_TIMEOUTS[event] }];
   return TOOL_EVENTS.has(event) ? { matcher: '*', hooks } : { hooks };
 }
 

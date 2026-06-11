@@ -95,13 +95,26 @@ export class Engine {
     );
 
     this.wss.on('connection', (ws) => this.onDashboardConnect(ws));
+    // ws re-emits http server errors (e.g. EADDRINUSE) on the wss; without a handler that's an
+    // unhandled 'error' crash that pre-empts listen()'s clean rejection path. Swallow here — the
+    // same error still rejects listen() via the http 'error' listener.
+    this.wss.on('error', () => {});
   }
 
   async listen(): Promise<void> {
     // Resolve the injection classifier (D13): the ONNX companion package if installed, else the
     // always-on heuristic baseline, else disabled. Done here so a slow model load doesn't block import.
     this.injection = await loadInjectionClassifier(this.opts.injection);
-    await new Promise<void>((resolve) => this.http.listen(this.opts.port, () => resolve()));
+    // Bind to loopback only — the approval surface (/decision) is unauthenticated by design for the
+    // local single-user tier, so it must never be reachable from the LAN. Reject on listen errors
+    // (e.g. EADDRINUSE) instead of hanging: a gateway the user *thinks* is running is worse than none.
+    await new Promise<void>((resolve, reject) => {
+      this.http.once('error', reject);
+      this.http.listen(this.opts.port, '127.0.0.1', () => {
+        this.http.removeListener('error', reject);
+        resolve();
+      });
+    });
   }
 
   /** Name of the resolved injection classifier ('onnx' / 'heuristic' / 'disabled') — for the CLI banner. */
@@ -394,8 +407,15 @@ export class Engine {
 
 /** Open a URL in the user's default browser, cross-platform, detached (best-effort). */
 function defaultOpener(url: string): void {
-  const cmd = process.platform === 'darwin' ? 'open' : process.platform === 'win32' ? 'start' : 'xdg-open';
-  const child = spawn(cmd, [url], { stdio: 'ignore', detached: true, shell: process.platform === 'win32' });
+  // Windows: `cmd /c start "" "<url>"` — the empty "" is the window title, so a URL with `?`/`&`
+  // isn't mistaken for one. macOS: `open`. Linux/BSD: `xdg-open`. No shell ⇒ no extra quoting hazards.
+  const [cmd, args] =
+    process.platform === 'darwin'
+      ? ['open', [url]]
+      : process.platform === 'win32'
+        ? ['cmd', ['/c', 'start', '', url]]
+        : ['xdg-open', [url]];
+  const child = spawn(cmd as string, args as string[], { stdio: 'ignore', detached: true });
   child.unref();
 }
 
