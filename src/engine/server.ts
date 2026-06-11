@@ -79,7 +79,15 @@ export class Engine {
   private readonly audit: AuditLog;
   private readonly clients = new Set<WebSocket>();
   private readonly http = createServer((req, res) => this.route(req, res));
-  private readonly wss = new WebSocketServer({ server: this.http, path: '/ws' });
+  // verifyClient rejects the CSWSH vector: a browser on a malicious page can open a WebSocket to our
+  // loopback port (WS is exempt from same-origin/CORS), and our /ws both leaks pending tool inputs and
+  // accepts `decision` frames that auto-approve a held call. So we gate the handshake on Origin — see
+  // originAllowed: present-and-non-loopback Origins are refused; absent Origin (non-browser clients) is fine.
+  private readonly wss = new WebSocketServer({
+    server: this.http,
+    path: '/ws',
+    verifyClient: (info: { req: IncomingMessage }) => originAllowed(info.req.headers.origin),
+  });
 
   constructor(private readonly opts: EngineOptions) {
     this.policy = new JsonLogicPolicyEngine(opts.rulesPath);
@@ -145,6 +153,9 @@ export class Engine {
         return json(res, 200, { pending: this.store.pending() });
       }
       if (req.method === 'POST' && req.url === '/decision') {
+        // Same sink as /ws (resolveContext auto-approves a held call) — gate cross-origin browsers out
+        // (defense-in-depth alongside the missing-CORS-handler preflight that already blocks JSON POSTs).
+        if (!originAllowed(req.headers.origin)) return json(res, 403, { error: 'forbidden origin' });
         const body = await readJson<DashboardToServer>(req);
         await this.store.resolveContext(body.violationId, body.action);
         return json(res, 200, { ok: true });
@@ -404,6 +415,24 @@ export class Engine {
 }
 
 /* --------------------------------- helpers --------------------------------- */
+
+/**
+ * Is this request's Origin allowed to reach the approval surface (/ws, /decision)?
+ *  - absent Origin ⇒ a non-browser client (the hook, tests, curl) — not the CSWSH vector ⇒ allow.
+ *  - present Origin ⇒ allow ONLY loopback hosts (the served dashboard, or a vite-dev origin on any
+ *    port); reject everything else, which is the cross-site browser page a CSWSH attack runs from.
+ *  - malformed Origin ⇒ reject.
+ * Loopback is matched by host (any port) so `vite dev` on :5173 → engine on :9000 still works.
+ */
+function originAllowed(origin: string | undefined): boolean {
+  if (!origin) return true;
+  try {
+    const host = new URL(origin).hostname;
+    return host === '127.0.0.1' || host === 'localhost' || host === '::1' || host === '[::1]';
+  } catch {
+    return false;
+  }
+}
 
 /** Open a URL in the user's default browser, cross-platform, detached (best-effort). */
 function defaultOpener(url: string): void {

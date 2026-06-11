@@ -87,7 +87,7 @@ the built-in heuristic classifier; install it only if you want it. The core is O
 npm run engine            # run from source via tsx (dev)
 npm run typecheck
 npm run test:behavioral && npm run test:content && npm run test:injection && npm run test:risk \
-  && npm run test:init && npm run test:projector && npm run test:audit && npm run test:notify
+  && npm run test:init && npm run test:projector && npm run test:audit && npm run test:notify && npm run test:security
 npm run e2e:behavioral && npm run e2e:content && npm run e2e:injection && npm run e2e:risk
 ```
 See `PLAN.md` for milestones and `brainstorms/` for the design records behind each decision.
