@@ -141,7 +141,17 @@ Owner laid out a 7-step plan; mapped against what this session already shipped:
   tool output (incl. potential secrets) to disk. Needs an explicit opt-in/redaction decision.
 - **Step 5 — Filtering + search: ✅ already done** (event/signal/band chips + free-text over
   tool/reason/payload). Optional: a dedicated tool-name chip.
-- **Step 6 — Replay mode: ⬜ not started** (pro feature — step through a session event-by-event).
+- **Step 6 — Replay mode: 🔨 in progress** ("YouTube of agent decisions" — replay a session like a movie).
+  - **D31 — Pure client-side, a toggle inside the Session timeline.** Reuses the already-fetched
+    correlated `items`; no backend, no new endpoint. A "▶ Replay" button flips the timeline into player mode.
+  - **D32 — Event-paced playback + scrubber.** Play/pause auto-advances one item at a fixed cadence
+    (~900ms at 1×) with a speed control (0.5×/1×/2×/4×), step back/forward, and a scrubber (cursor/total).
+    Ignores real-world time gaps so it's watchable. Replay traverses ALL items (filters hidden in replay).
+  - **D33 — Cumulative state panel + risk sparkline at the cursor.** The panel reconstructs session
+    state up to the cursor by re-running the shared `summarizeSession` over the event prefix (running
+    risk peak/score, secrets loaded, injection posture, currently-held count, verdict counts, drivers) —
+    so you literally watch the risk build. A small SVG sparkline plots per-item risk score across the
+    session with the cursor marked. Timeline dims future events, highlights the current one.
 - **Step 7 — M5 multi-agent adapters: ⬜ future** (Cursor / Codex / Roo / Cline over the same engine).
 
 ## Open flags

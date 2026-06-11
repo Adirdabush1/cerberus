@@ -162,6 +162,7 @@ function TimelineDetail({ sessionId, events, items, summary, now }: { sessionId:
   const [signalFilter, setSignalFilter] = useState<Set<SignalSource>>(new Set());
   const [bandFilter, setBandFilter] = useState<Set<RiskBand>>(new Set());
   const [text, setText] = useState('');
+  const [replay, setReplay] = useState(false);
 
   // Only offer chips for values that actually occur in this timeline (keeps the bar uncluttered).
   const present = useMemo(() => {
@@ -203,21 +204,149 @@ function TimelineDetail({ sessionId, events, items, summary, now }: { sessionId:
         )}
       </div>
 
-      <FilterBar
-        present={present}
-        eventFilter={eventFilter} setEventFilter={setEventFilter}
-        signalFilter={signalFilter} setSignalFilter={setSignalFilter}
-        bandFilter={bandFilter} setBandFilter={setBandFilter}
-        text={text} setText={setText}
-      />
+      <div className="flex items-center gap-2 mb-3">
+        <h3 className="text-xs font-semibold uppercase tracking-wider text-slate-500">{replay ? 'Replay' : 'Timeline'}</h3>
+        <button
+          onClick={() => setReplay((r) => !r)}
+          className={`ml-auto text-xs font-semibold px-2.5 py-1 rounded-lg ring-1 transition ${
+            replay ? 'bg-emerald-500/20 text-emerald-200 ring-emerald-500/40' : 'bg-slate-800/60 text-slate-300 ring-white/10 hover:text-slate-100'
+          }`}
+        >
+          {replay ? '✕ Exit replay' : '▶ Replay'}
+        </button>
+      </div>
 
+      {replay ? (
+        <Replay sessionId={sessionId} items={items} />
+      ) : (
+        <>
+          <FilterBar
+            present={present}
+            eventFilter={eventFilter} setEventFilter={setEventFilter}
+            signalFilter={signalFilter} setSignalFilter={setSignalFilter}
+            bandFilter={bandFilter} setBandFilter={setBandFilter}
+            text={text} setText={setText}
+          />
+          <div className="mt-4 relative pl-6">
+            <div className="absolute left-[7px] top-1 bottom-1 w-px bg-white/10" aria-hidden />
+            {shown.length === 0 ? (
+              <div className="text-sm text-slate-600 py-6">No events match the filters.</div>
+            ) : (
+              shown.map((it, i) => <TimelineRow key={`${eventKey(it.primary)}-${i}`} item={it} />)
+            )}
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+const SPEEDS = [0.5, 1, 2, 4];
+const BASE_MS = 900; // cadence at 1× — divided by speed
+
+/** The raw events covered by items[0..cursor] (a held item contributes both its open and resolve). */
+function eventsUpTo(items: TimelineItem[], cursor: number): AuditEntry[] {
+  const out: AuditEntry[] = [];
+  for (let i = 0; i <= cursor && i < items.length; i++) {
+    const it = items[i];
+    if (!it) continue;
+    out.push(it.primary);
+    if (it.resolvedBy) out.push(it.resolvedBy);
+  }
+  return out;
+}
+
+/** Count calls held but not yet resolved within a prefix — the "currently awaiting approval" gauge. */
+function heldOpenCount(events: AuditEntry[]): number {
+  const open = new Set<string>();
+  for (const e of events) {
+    if (e.event === 'hitl-opened' && e.requestId) open.add(e.requestId);
+    if (e.event === 'hitl-resolved' && e.requestId) open.delete(e.requestId);
+  }
+  return open.size;
+}
+
+function Replay({ sessionId, items }: { sessionId: string; items: TimelineItem[] }) {
+  const [cursor, setCursor] = useState(0);
+  const [playing, setPlaying] = useState(false);
+  const [speed, setSpeed] = useState(1);
+  const last = Math.max(0, items.length - 1);
+
+  // Event-paced auto-advance (D32): one item per tick; stop at the end.
+  useEffect(() => {
+    if (!playing) return;
+    if (cursor >= last) { setPlaying(false); return; }
+    const id = setTimeout(() => setCursor((c) => Math.min(last, c + 1)), BASE_MS / speed);
+    return () => clearTimeout(id);
+  }, [playing, cursor, speed, last]);
+
+  const prefix = useMemo(() => eventsUpTo(items, cursor), [items, cursor]);
+  const state = useMemo(() => summarizeSession(sessionId, prefix), [sessionId, prefix]);
+  const held = useMemo(() => heldOpenCount(prefix), [prefix]);
+  const scores = useMemo(() => items.map((it) => (it.resolvedBy?.risk ?? it.primary.risk)?.score ?? 0), [items]);
+  const maxScore = Math.max(1, ...scores);
+
+  const play = () => { if (cursor >= last) setCursor(0); setPlaying(true); };
+  const current = items[cursor];
+  const currentLabel = current ? EVENT_META[current.resolvedBy ? 'hitl-resolved' : current.primary.event].label : '';
+
+  return (
+    <div>
+      {/* transport */}
+      <div className="rounded-xl border border-white/10 bg-slate-900/50 p-3 flex items-center gap-2 flex-wrap">
+        <button onClick={() => setCursor((c) => Math.max(0, c - 1))} className="text-slate-300 hover:text-white px-1" title="Step back">⏮</button>
+        <button onClick={() => (playing ? setPlaying(false) : play())} className="rounded-lg bg-emerald-500/90 hover:bg-emerald-400 text-emerald-950 font-bold text-sm w-9 h-7" title={playing ? 'Pause' : 'Play'}>
+          {playing ? '⏸' : '⏵'}
+        </button>
+        <button onClick={() => setCursor((c) => Math.min(last, c + 1))} className="text-slate-300 hover:text-white px-1" title="Step forward">⏭</button>
+        <input
+          type="range" min={0} max={last} value={cursor}
+          onChange={(e) => { setPlaying(false); setCursor(Number(e.target.value)); }}
+          className="flex-1 min-w-[8rem] accent-emerald-400"
+        />
+        <span className="text-[11px] tabular-nums text-slate-400 shrink-0">{cursor + 1}/{items.length}</span>
+        <div className="flex items-center gap-1 ml-1">
+          {SPEEDS.map((s) => (
+            <button key={s} onClick={() => setSpeed(s)} className={`text-[10px] px-1.5 py-0.5 rounded ${speed === s ? 'bg-white/15 text-slate-100' : 'text-slate-500 hover:text-slate-300'}`}>{s}×</button>
+          ))}
+        </div>
+      </div>
+
+      {/* cumulative state @ cursor + risk sparkline (D33) */}
+      <div className="mt-3 rounded-xl border border-white/10 bg-slate-900/50 p-3">
+        <div className="flex items-center gap-2 flex-wrap text-xs">
+          <span className="text-slate-500">state @ {clockTime(current?.primary.ts ?? 0)} —</span>
+          <span className="text-slate-300">{currentLabel}</span>
+          <span className={`ml-auto text-[10px] font-semibold px-1.5 py-0.5 rounded ring-1 ${BAND_STYLE[state.peakBand]}`}>risk {state.peakBand} · {state.peakRiskScore}</span>
+        </div>
+        <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-[11px] text-slate-400">
+          <span className="text-emerald-400">{state.allowed} allowed</span>
+          <span className="text-red-400">{state.blocked} blocked</span>
+          <span className="text-amber-400">{held} awaiting</span>
+          <span className="text-orange-400">{state.taintLoaded} secrets</span>
+          <span className="text-red-400">{state.injections} injections</span>
+          {state.toolFailures > 0 && <span className="text-rose-400">{state.toolFailures} failed</span>}
+        </div>
+        {state.drivers.length > 0 && (
+          <div className="mt-1.5 text-[11px]"><span className="text-slate-500">drivers so far: </span><span className="text-slate-300">{state.drivers.join(' + ')}</span></div>
+        )}
+        <svg viewBox={`0 0 ${Math.max(1, last)} 24`} preserveAspectRatio="none" className="mt-2 w-full h-8 overflow-visible">
+          <polyline
+            points={scores.map((s, i) => `${i},${24 - (s / maxScore) * 22}`).join(' ')}
+            fill="none" stroke="rgb(251 146 60 / 0.7)" strokeWidth={0.4}
+          />
+          <line x1={cursor} x2={cursor} y1={0} y2={24} stroke="rgb(52 211 153)" strokeWidth={0.5} />
+        </svg>
+      </div>
+
+      {/* the timeline, dimming the future and ringing the current item */}
       <div className="mt-4 relative pl-6">
         <div className="absolute left-[7px] top-1 bottom-1 w-px bg-white/10" aria-hidden />
-        {shown.length === 0 ? (
-          <div className="text-sm text-slate-600 py-6">No events match the filters.</div>
-        ) : (
-          shown.map((it, i) => <TimelineRow key={`${eventKey(it.primary)}-${i}`} item={it} />)
-        )}
+        {items.map((it, i) => (
+          <div key={`${eventKey(it.primary)}-${i}`} className={`transition ${i > cursor ? 'opacity-30' : ''} ${i === cursor ? 'ring-2 ring-emerald-500/50 rounded-lg' : ''}`}>
+            <TimelineRow item={it} />
+          </div>
+        ))}
       </div>
     </div>
   );
