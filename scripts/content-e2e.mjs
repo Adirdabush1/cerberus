@@ -84,7 +84,7 @@ async function heldDecision(call, action) {
 
 console.log('AgentGuard M3a content e2e — "caught the exfil"\n');
 
-const engine = spawn('npx', ['tsx', 'src/cli/index.ts', 'engine'], {
+const engine = spawn(process.execPath, ['--import', 'tsx', 'src/cli/index.ts', 'engine'], {
   env: { ...process.env, AG_ENGINE_PORT: String(PORT), AG_TTL_MS: String(TTL_MS), AG_AUDIT: auditFile },
   stdio: ['ignore', 'ignore', 'inherit'],
 });

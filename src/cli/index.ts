@@ -130,4 +130,7 @@ async function main(): Promise<void> {
   process.exit(1);
 }
 
-void main();
+main().catch((err: unknown) => {
+  process.stderr.write(`AgentGuard: ${err instanceof Error ? err.message : String(err)}\n`);
+  process.exit(1);
+});

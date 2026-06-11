@@ -40,7 +40,8 @@ try {
     check('creates .claude/settings.json', existsSync(sp));
     const s = read(sp);
     const cmd = s.hooks?.PreToolUse?.[0]?.hooks?.[0]?.command ?? '';
-    check('PreToolUse hook wired (node … hook)', /bin\/agentguard\.mjs hook$/.test(cmd), cmd);
+    // path is quoted (Windows spaces) and may use either separator
+    check('PreToolUse hook wired (node "…/agentguard.mjs" hook)', /agentguard\.mjs"? hook$/.test(cmd), cmd);
     check('PostToolUse hook wired', !!s.hooks?.PostToolUse?.[0]?.hooks?.[0]?.command);
     check('PreToolUse timeout >= 300 (>= engine TTL)', s.hooks.PreToolUse[0].hooks[0].timeout >= 300);
     check('SessionStart hook wired', !!s.hooks?.SessionStart?.[0]?.hooks?.[0]?.command);

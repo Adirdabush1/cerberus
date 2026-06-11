@@ -84,7 +84,7 @@ async function waitForEngine(timeoutMs = 8000) {
 
 console.log('AgentGuard M2 behavioral e2e — "caught a loop"\n');
 
-const engine = spawn('npx', ['tsx', 'src/cli/index.ts', 'engine'], {
+const engine = spawn(process.execPath, ['--import', 'tsx', 'src/cli/index.ts', 'engine'], {
   env: {
     ...process.env,
     AG_ENGINE_PORT: String(PORT),

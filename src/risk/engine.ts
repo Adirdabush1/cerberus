@@ -51,6 +51,16 @@ export interface RiskEngine {
 
 const ATTRIBUTION_PRIORITY: readonly SignalSource[] = ['content', 'behavioral', 'policy'];
 
+/** Every weight `assess()` reads — validated at load so a config typo can't silently zero a signal. */
+const REQUIRED_WEIGHTS: readonly [group: string, label: string][] = [
+  ['egress', 'policy_egress'],
+  ['egress', 'content_exfil'],
+  ['egress', 'content_injection'],
+  ['egress', 'path_risk'],
+  ['command', 'policy_hitl'],
+  ['behavioral', 'behavioral_review'],
+];
+
 export class WeightedRiskEngine implements RiskEngine {
   private readonly w: WeightsFile;
 
@@ -62,6 +72,18 @@ export class WeightedRiskEngine implements RiskEngine {
     const parsed = yaml.load(readFileSync(weightsPath, 'utf8')) as Partial<WeightsFile> | undefined;
     if (!parsed?.version || !parsed.bands || !parsed.groups) {
       throw new Error(`AgentGuard: invalid risk weights at ${weightsPath} (expected { version, bands, groups }).`);
+    }
+    // Fail fast on missing/non-numeric weights: `add()` skips undefined points, so a key silently
+    // dropped from the config would zero that signal's score (e.g. all EGRESS HITLs scoring ALLOW).
+    for (const band of ['audit', 'hitl', 'block'] as const) {
+      if (typeof parsed.bands[band] !== 'number') {
+        throw new Error(`AgentGuard: risk weights at ${weightsPath} missing numeric band "${band}".`);
+      }
+    }
+    for (const [group, label] of REQUIRED_WEIGHTS) {
+      if (typeof parsed.groups[group]?.[label] !== 'number') {
+        throw new Error(`AgentGuard: risk weights at ${weightsPath} missing numeric weight "groups.${group}.${label}".`);
+      }
     }
     this.w = { version: parsed.version, bands: parsed.bands, groups: parsed.groups };
   }
