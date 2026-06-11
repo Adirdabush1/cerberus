@@ -121,8 +121,8 @@ try {
   await sleep(150);
   const entries = readFileSync(auditFile, 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l));
   check(
-    'audit: injection-detected event tagged signal:"content"',
-    entries.some((e) => e.signal === 'content' && e.ruleId === 'content-injection-detected'),
+    'audit: injection-detected event tagged signal:"content" (carries a score)',
+    entries.some((e) => e.event === 'injection-detected' && e.signal === 'content' && typeof e.injectionScore === 'number'),
     JSON.stringify(entries.filter((e) => e.signal === 'content').slice(0, 3)),
   );
   check(

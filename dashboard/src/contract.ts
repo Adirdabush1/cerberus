@@ -46,16 +46,67 @@ export interface SecurityViolation {
   risk?: RiskAssessment;
 }
 
+export type AuditEvent =
+  | 'decision'
+  | 'hitl-opened'
+  | 'hitl-resolved'
+  | 'session-started'
+  | 'session-ended'
+  | 'taint-loaded'
+  | 'injection-detected'
+  | 'tool-failed';
+
+export type HitlResolution = 'approved' | 'rejected' | 'expired';
+
 export interface AuditEntry {
+  event: AuditEvent;
   ts: number;
-  tool: string;
-  category: ToolCategory;
-  action: FinalAction;
-  ruleId: string | null;
   reason: string;
-  viaHitl: boolean;
-  signal: SignalSource;
+  sessionId?: string;
+  requestId?: string;
+  tool?: string;
+  input?: Record<string, unknown>;
+  category?: ToolCategory;
+  action?: FinalAction;
+  ruleId?: string | null;
+  viaHitl?: boolean;
+  signal?: SignalSource;
   risk?: RiskAssessment;
+  resolution?: HitlResolution;
+  latencyMs?: number;
+  secretTypes?: string[];
+  injectionScore?: number;
+}
+
+export interface SessionSummary {
+  sessionId: string;
+  firstTs: number;
+  lastTs: number;
+  startedAt?: number;
+  endedAt?: number;
+  verdicts: number;
+  allowed: number;
+  blocked: number;
+  held: number;
+  taintLoaded: number;
+  injections: number;
+  toolFailures: number;
+  peakRiskScore: number;
+  peakBand: RiskBand;
+  signals: SignalSource[];
+  drivers: string[];
+}
+
+export interface TimelineItem {
+  primary: AuditEntry;
+  resolvedBy?: AuditEntry;
+}
+
+export interface SessionTimeline {
+  sessionId: string;
+  summary: SessionSummary;
+  events: AuditEntry[];
+  items: TimelineItem[];
 }
 
 export type ServerToDashboard =

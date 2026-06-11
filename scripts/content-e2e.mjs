@@ -124,8 +124,8 @@ try {
   await sleep(150);
   const entries = readFileSync(auditFile, 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l));
   check(
-    'audit: secret-load event tagged signal:"content" + rule "content-secret-loaded"',
-    entries.some((e) => e.signal === 'content' && e.ruleId === 'content-secret-loaded'),
+    'audit: taint-loaded event tagged signal:"content" (names the secret type)',
+    entries.some((e) => e.event === 'taint-loaded' && e.signal === 'content' && Array.isArray(e.secretTypes) && e.secretTypes.length > 0),
     JSON.stringify(entries.filter((e) => e.signal === 'content').slice(0, 3)),
   );
   check(

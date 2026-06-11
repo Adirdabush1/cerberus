@@ -29,7 +29,9 @@
     "e2e:injection": "node scripts/injection-e2e.mjs",
     "test:risk": "tsx scripts/risk.test.ts",
     "e2e:risk": "node scripts/risk-e2e.mjs",
-    "test:init": "tsx scripts/init.test.ts"
+    "test:init": "tsx scripts/init.test.ts",
+    "test:projector": "tsx scripts/projector.test.ts",
+    "test:audit": "tsx scripts/audit.test.ts"
   },
   "dependencies": {
     "js-yaml": "^4.1.0",

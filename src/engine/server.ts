@@ -33,18 +33,19 @@ import {
 } from '../signals/injection.js';
 import { WeightedRiskEngine, type RiskEngine } from '../risk/engine.js';
 import { AuditLog } from '../audit/index.js';
+import { projectTimeline, summarizeSessions } from '../audit/projector.js';
 import { classify } from '../taxonomy/index.js';
 import type {
   AuditEntry,
   DashboardToServer,
   FinalAction,
+  HitlResolution,
   InspectRequest,
   MCPToolCall,
   PipelineResult,
-  RiskAssessment,
   SecurityViolation,
   ServerToDashboard,
-  SignalSource,
+  SessionEvent,
 } from '../contract/types.js';
 
 export interface EngineOptions {
@@ -133,6 +134,18 @@ export class Engine {
       if (req.method === 'POST' && req.url === '/inspect') {
         return await this.handleInspect(req, res);
       }
+      if (req.method === 'POST' && req.url === '/session') {
+        return await this.handleSession(req, res);
+      }
+      // Investigation history (D25): project the replayed audit log into session rollups / a timeline.
+      // O(log size) per request — fine for the local single-engine tier; the paid tier would index.
+      if (req.method === 'GET' && req.url === '/sessions') {
+        return json(res, 200, { sessions: summarizeSessions(this.audit.read()) });
+      }
+      if (req.method === 'GET' && req.url?.startsWith('/sessions/')) {
+        const m = /^\/sessions\/([^/]+)\/timeline\/?$/.exec(req.url.split('?')[0] ?? '');
+        if (m) return json(res, 200, projectTimeline(this.audit.read(), decodeURIComponent(m[1] as string)));
+      }
       // The dashboard (static) is served LAST, so it never shadows an API route (D20).
       if (req.method === 'GET' && this.opts.staticDir) {
         return this.serveStatic(req, res);
@@ -146,6 +159,8 @@ export class Engine {
   /** The synchronous hold + multi-signal decision pipeline (PreToolUse). */
   private async handleIntercept(req: IncomingMessage, res: ServerResponse): Promise<void> {
     const call = await readJson<MCPToolCall>(req);
+    const requestId = randomUUID(); // one id per tool-call decision; links its lifecycle events (D24)
+    const category = classify(call.tool);
 
     // Run all three signals (each has side effects — behavioral records the call, content records
     // path-risk), then fold them into one decision via strictest-wins (D7).
@@ -155,18 +170,20 @@ export class Engine {
     // M3c: aggregate the three into one risk-scored decision (hard floor + weighted bands).
     const { action, reason, ruleId, signal, risk } = this.risk.assess(policy, anomaly, content);
 
+    const base = { sessionId: call.sessionId, requestId, tool: call.tool, input: call.input, category, ruleId, signal, risk };
+
     // Auto paths: answer immediately. (AUDIT band collapses to ALLOW for the agent — D17 — but the
     // audit record carries risk.band='AUDIT' so it surfaces as elevated-risk on the dashboard.)
     if (action === 'ALLOW' || action === 'BLOCK') {
-      this.writeAudit(call, action, ruleId, reason, false, signal, risk);
+      this.writeAudit({ ...base, event: 'decision', action, reason, viaHitl: false });
       return json(res, 200, finalResult(action, reason));
     }
 
     // HITL: build a violation, hold the socket, and wait for a verdict.
     const violation: SecurityViolation = {
-      id: randomUUID(),
+      id: requestId,
       toolCall: call,
-      category: classify(call.tool),
+      category,
       ruleId,
       reason,
       createdAt: Date.now(),
@@ -183,10 +200,19 @@ export class Engine {
       if (!settled) void this.store.cleanup(violation.id);
     });
 
+    this.writeAudit({ ...base, event: 'hitl-opened', reason });
     const result = await this.store.registerContext(violation, this.opts.ttlMs);
     settled = true;
 
-    this.writeAudit(call, result.action, ruleId, result.reason, true, signal, risk);
+    this.writeAudit({
+      ...base,
+      event: 'hitl-resolved',
+      action: result.action,
+      reason: result.reason,
+      viaHitl: true,
+      resolution: resolutionOf(result.action, result.reason),
+      latencyMs: Date.now() - violation.createdAt,
+    });
     if (!res.writableEnded) json(res, 200, result);
   }
 
@@ -197,6 +223,19 @@ export class Engine {
   private async handleInspect(req: IncomingMessage, res: ServerResponse): Promise<void> {
     const body = await readJson<InspectRequest>(req);
     const call: MCPToolCall = { tool: body.tool, input: body.input ?? {}, sessionId: body.sessionId };
+
+    // A failed tool produced no result to scan — record the failure for the timeline and stop (D23).
+    if (body.error) {
+      this.writeAudit({
+        event: 'tool-failed',
+        sessionId: body.sessionId,
+        tool: body.tool,
+        category: classify(body.tool),
+        reason: body.error.slice(0, 500),
+      });
+      return json(res, 200, { ok: true, failed: true });
+    }
+
     const text = body.toolResponse ?? '';
     const outcome = this.contamination.inspect(call, text);
 
@@ -210,28 +249,30 @@ export class Engine {
       if (verdict.score >= this.opts.injection.threshold) {
         injectionFlagged = true;
         this.contamination.flagInjection(call.sessionId ?? 'default', verdict.score, call.tool);
-        this.writeAudit(
-          call,
-          'ALLOW',
-          'content-injection-detected',
-          `Prompt-injection detected in ${call.tool} result (score ${verdict.score.toFixed(2)}, ${this.injection.name}). Session posture raised — outbound calls now require review.`,
-          false,
-          'content',
-        );
+        this.writeAudit({
+          event: 'injection-detected',
+          sessionId: call.sessionId,
+          tool: call.tool,
+          category: classify(call.tool),
+          signal: 'content',
+          injectionScore: verdict.score,
+          reason: `Prompt-injection detected in ${call.tool} result (score ${verdict.score.toFixed(2)}, ${this.injection.name}). Session posture raised — outbound calls now require review.`,
+        });
       }
     }
 
     if (outcome.tainted) {
       // Auditable security event: a secret entered the agent's context. Not a block (the read already
       // happened) — it arms the exfil gate for subsequent egress on this session.
-      this.writeAudit(
-        call,
-        'ALLOW',
-        'content-secret-loaded',
-        `Secret loaded into context via ${call.tool}: ${outcome.secretTypes.join(', ')}. Session tainted — outbound calls now require review.`,
-        false,
-        'content',
-      );
+      this.writeAudit({
+        event: 'taint-loaded',
+        sessionId: call.sessionId,
+        tool: call.tool,
+        category: classify(call.tool),
+        signal: 'content',
+        secretTypes: outcome.secretTypes,
+        reason: `Secret loaded into context via ${call.tool}: ${outcome.secretTypes.join(', ')}. Session tainted — outbound calls now require review.`,
+      });
     }
     return json(res, 200, {
       ok: true,
@@ -241,6 +282,29 @@ export class Engine {
       injectionScore,
       classifier: this.injection.name,
     });
+  }
+
+  /**
+   * SessionStart / SessionEnd (D23). Observability-only — bookends the session timeline. On 'ended'
+   * we also reset the per-session monitor state, which is the deterministic counterpart to the
+   * idle-eviction in M2/M3 (a session that ends cleanly shouldn't wait to be swept).
+   */
+  private async handleSession(req: IncomingMessage, res: ServerResponse): Promise<void> {
+    const body = await readJson<SessionEvent>(req);
+    const sessionId = body.sessionId || 'default';
+    if (body.event === 'ended') {
+      this.behavioral.reset(sessionId);
+      this.contamination.reset(sessionId);
+    }
+    this.writeAudit({
+      event: body.event === 'started' ? 'session-started' : 'session-ended',
+      sessionId,
+      reason:
+        body.event === 'started'
+          ? `Session started${body.source ? ` (${body.source})` : ''}.`
+          : 'Session ended — monitor state reset.',
+    });
+    return json(res, 200, { ok: true });
   }
 
   /* ------------------------------- WebSocket -------------------------------- */
@@ -284,28 +348,14 @@ export class Engine {
 
   /* --------------------------------- audit ---------------------------------- */
 
-  private writeAudit(
-    call: MCPToolCall,
-    action: FinalAction,
-    ruleId: string | null,
-    reason: string,
-    viaHitl: boolean,
-    signal: SignalSource,
-    risk?: RiskAssessment,
-  ): void {
-    const entry: AuditEntry = {
-      ts: Date.now(),
-      tool: call.tool,
-      category: classify(call.tool),
-      action,
-      ruleId,
-      reason,
-      viaHitl,
-      signal,
-      risk,
-    };
-    this.audit.record(entry);
-    this.broadcast({ type: 'audit', entry });
+  /**
+   * Append one event to the audit log (single source of truth, D22) and stream it live to every
+   * dashboard. `sessionId` is coerced to 'default' so every record is attributable (hardening, step 1);
+   * a record the log rejects as malformed is NOT broadcast, so live and history stay consistent.
+   */
+  private writeAudit(entry: Omit<AuditEntry, 'ts'>): void {
+    const full: AuditEntry = { ts: Date.now(), ...entry, sessionId: entry.sessionId ?? 'default' };
+    if (this.audit.record(full)) this.broadcast({ type: 'audit', entry: full });
   }
 }
 
@@ -313,6 +363,12 @@ export class Engine {
 
 function finalResult(action: FinalAction, reason: string): PipelineResult {
   return { action, reason };
+}
+
+/** Classify how a held call ended, from the store's verdict — for the hitl-resolved latency event (D23). */
+function resolutionOf(action: FinalAction, reason: string): HitlResolution {
+  if (action === 'ALLOW') return 'approved';
+  return /timed out|disconnected/i.test(reason) ? 'expired' : 'rejected';
 }
 
 const CONTENT_TYPES: Readonly<Record<string, string>> = {

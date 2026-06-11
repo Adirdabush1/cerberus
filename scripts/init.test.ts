@@ -43,6 +43,9 @@ try {
     check('PreToolUse hook wired (node … hook)', /bin\/agentguard\.mjs hook$/.test(cmd), cmd);
     check('PostToolUse hook wired', !!s.hooks?.PostToolUse?.[0]?.hooks?.[0]?.command);
     check('PreToolUse timeout >= 300 (>= engine TTL)', s.hooks.PreToolUse[0].hooks[0].timeout >= 300);
+    check('SessionStart hook wired', !!s.hooks?.SessionStart?.[0]?.hooks?.[0]?.command);
+    check('SessionEnd hook wired', !!s.hooks?.SessionEnd?.[0]?.hooks?.[0]?.command);
+    check('session hooks carry no matcher (not tool-scoped)', s.hooks.SessionStart[0].matcher === undefined && s.hooks.SessionEnd[0].matcher === undefined);
   }
 
   // ── idempotent: a second init adds nothing, no duplicates ──
@@ -77,7 +80,7 @@ try {
     const dir = mkdtempSync(join(tmpdir(), 'ag-init-'));
     process.chdir(dir);
     const { out } = quiet(() => runInit(['--print']));
-    check('--print emits a hooks snippet', /PreToolUse/.test(out) && /PostToolUse/.test(out));
+    check('--print emits a hooks snippet', /PreToolUse/.test(out) && /PostToolUse/.test(out) && /SessionStart/.test(out) && /SessionEnd/.test(out));
     check('--print writes no file', !existsSync(join(dir, '.claude', 'settings.json')));
   }
 } finally {

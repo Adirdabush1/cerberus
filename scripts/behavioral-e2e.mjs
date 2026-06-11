@@ -146,7 +146,9 @@ try {
     .filter(Boolean)
     .map((l) => JSON.parse(l));
 
-  const behavioral = entries.filter((e) => e.signal === 'behavioral');
+  // M4-B: the audit log now also carries lifecycle events (hitl-opened has no verdict). This
+  // provenance check is about VERDICTS, so scope to entries that carry an action (decision/hitl-resolved).
+  const behavioral = entries.filter((e) => e.signal === 'behavioral' && e.action != null);
   const policyTagged = entries.filter((e) => e.tool === 'Bash' && e.signal === 'policy');
   check(
     'audit: behavioral blocks tagged signal:"behavioral" + rule "behavioral-anomaly"',
