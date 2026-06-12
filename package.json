@@ -8,13 +8,13 @@
     "access": "public"
   },
   "author": "Adir Dabush <Adir.dabush@msapps.mobi>",
-  "homepage": "https://github.com/Adirdabush1/agentguard#readme",
+  "homepage": "https://github.com/Adirdabush1/cerberus#readme",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/Adirdabush1/agentguard.git"
+    "url": "git+https://github.com/Adirdabush1/cerberus.git"
   },
   "bugs": {
-    "url": "https://github.com/Adirdabush1/agentguard/issues"
+    "url": "https://github.com/Adirdabush1/cerberus/issues"
   },
   "keywords": [
     "ai",
