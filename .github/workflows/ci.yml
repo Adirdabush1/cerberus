@@ -1,0 +1,46 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# Least privilege (security project — eat our own dog food): the CI token is read-only, so a
+# malicious PR can't push to the repo or mint releases. Bump per-job only where genuinely needed.
+permissions:
+  contents: read
+
+jobs:
+  ci:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install (engine + dashboard are separate npm projects)
+        run: |
+          npm ci
+          npm --prefix dashboard ci
+
+      - name: Typecheck + build
+        run: |
+          npm run typecheck
+          npm run build
+
+      - name: Unit tests
+        run: |
+          for t in behavioral content injection risk init projector audit notify security policy adapters; do
+            echo "── test:$t ──"
+            npx tsx "scripts/$t.test.ts"
+          done
+
+      - name: E2E tests (each spawns its own engine)
+        run: |
+          for t in behavioral content injection risk; do
+            echo "── e2e:$t ──"
+            node "scripts/$t-e2e.mjs"
+          done

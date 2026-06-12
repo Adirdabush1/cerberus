@@ -1,0 +1,38 @@
+name: publish
+
+# Publishes to npm when a GitHub Release is published — with provenance, via OIDC trusted publishing
+# (NO long-lived NPM_TOKEN secret). npm verifies the workflow ran from this repo and mints a short-lived
+# credential just for this version. Requires a one-time setup on npmjs.com:
+#   npmjs.com → @cerberussec/core → Settings → Trusted Publishing → add this repo + workflow `publish.yml`.
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: read
+  id-token: write # required for provenance + OIDC trusted publishing
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          registry-url: https://registry.npmjs.org
+
+      - name: Use a provenance-capable npm
+        run: npm install -g npm@latest
+
+      - name: Install (engine + dashboard)
+        run: |
+          npm ci
+          npm --prefix dashboard ci
+
+      # prepublishOnly builds dist + dashboard. --provenance attaches a signed build attestation;
+      # --access public is required for a scoped package's first publish.
+      - name: Publish with provenance
+        run: npm publish --provenance --access public
