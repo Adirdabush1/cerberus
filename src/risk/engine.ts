@@ -55,6 +55,7 @@ const ATTRIBUTION_PRIORITY: readonly SignalSource[] = ['content', 'behavioral', 
 const REQUIRED_WEIGHTS: readonly [group: string, label: string][] = [
   ['egress', 'policy_egress'],
   ['egress', 'content_exfil'],
+  ['egress', 'content_exfil_match'],
   ['egress', 'content_injection'],
   ['egress', 'path_risk'],
   ['command', 'policy_hitl'],
@@ -105,7 +106,8 @@ export class WeightedRiskEngine implements RiskEngine {
       else add(factors, 'policy', 'command', 'policy_hitl', g.command?.policy_hitl);
     }
     if (anomaly.severity === 'review') add(factors, 'behavioral', 'behavioral', 'behavioral_review', g.behavioral?.behavioral_review);
-    if (content.kind === 'content-exfil') add(factors, 'content', 'egress', 'content_exfil', g.egress?.content_exfil);
+    if (content.kind === 'content-exfil-match') add(factors, 'content', 'egress', 'content_exfil_match', g.egress?.content_exfil_match);
+    else if (content.kind === 'content-exfil') add(factors, 'content', 'egress', 'content_exfil', g.egress?.content_exfil);
     else if (content.kind === 'content-injection') add(factors, 'content', 'egress', 'content_injection', g.egress?.content_injection);
     else if (content.kind === 'path-risk') add(factors, 'content', 'egress', 'path_risk', g.egress?.path_risk);
 

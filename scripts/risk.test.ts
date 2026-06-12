@@ -82,7 +82,7 @@ const band = (p: PolicyDecision, a: AnomalyVerdict, c: ContentVerdict) => risk.a
 
 // ── drift traceability: every assessment stamps the config version ──
 {
-  check('assessment carries config version', band(policy('ALLOW', 'READ'), NO_ANOMALY, NO_CONTENT).risk.version === 'm3c-risk-v1.0');
+  check('assessment carries config version', band(policy('ALLOW', 'READ'), NO_ANOMALY, NO_CONTENT).risk.version === 'm3c-risk-v1.1');
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);

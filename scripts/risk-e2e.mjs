@@ -103,7 +103,7 @@ try {
   const find = (sid, tool) => entries.filter((e) => e.tool === tool).reverse().find((e) => e.risk);
 
   const auditEntry = entries.find((e) => e.tool === 'WebFetch' && e.risk?.band === 'AUDIT');
-  check('audit: AUDIT-band record present (score in [40,75), version stamped)', !!auditEntry && auditEntry.risk.score >= 40 && auditEntry.risk.score < 75 && auditEntry.risk.version === 'm3c-risk-v1.0', JSON.stringify(auditEntry?.risk));
+  check('audit: AUDIT-band record present (score in [40,75), version stamped)', !!auditEntry && auditEntry.risk.score >= 40 && auditEntry.risk.score < 75 && auditEntry.risk.version === 'm3c-risk-v1.1', JSON.stringify(auditEntry?.risk));
 
   const blockEntry = entries.find((e) => e.tool === 'WebFetch' && e.risk?.band === 'BLOCK');
   check('audit: score-driven BLOCK (≥150, hardFloor=false, ≥2 factors)', !!blockEntry && blockEntry.risk.score >= 150 && blockEntry.risk.hardFloor === false && blockEntry.risk.factors.length >= 2, JSON.stringify(blockEntry?.risk));

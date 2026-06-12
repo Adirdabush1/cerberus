@@ -20,6 +20,7 @@ const BAND_RANK: Record<RiskBand, number> = { ALLOW: 0, AUDIT: 1, HITL: 2, BLOCK
  * than internal label slugs. Unknown labels pass through verbatim (forward-compatible with new weights).
  */
 const RISK_DRIVERS: Record<string, string> = {
+  content_exfil_match: 'secret in outbound payload (confirmed)',
   content_exfil: 'secret exfiltration',
   content_injection: 'prompt injection',
   path_risk: 'sensitive-path access',

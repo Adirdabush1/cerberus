@@ -13,7 +13,7 @@
 # `version` is stamped into every audit record for drift traceability (D16 #2). Golden test vectors
 # in scripts/risk.test.ts lock the expected bands — change weights only if those still pass (D16 #3).
 
-version: m3c-risk-v1.0
+version: m3c-risk-v1.1
 
 bands:
   audit: 40   # >= audit  -> AUDIT (ALLOW to the agent + elevated-risk annotation)
@@ -25,6 +25,7 @@ groups:
   egress:                 # one "outbound risk" concern — these never stack with each other
     policy_egress: 75     # policy HITL on an EGRESS-category call (the default egress rule)
     content_exfil: 80     # a secret was loaded and the agent is egressing (D4: HITL, not auto-block)
+    content_exfil_match: 120 # the OUTBOUND payload actually contains a loaded secret (confirmed exfil; M6) — HITL alone, BLOCK only if it stacks with another concern
     content_injection: 50 # the session ingested injection-flagged content and is egressing
     path_risk: 25         # accessed a sensitive path, now egressing (weak early-warning, D3/D4)
   command:                # a non-egress state-changer requiring review
