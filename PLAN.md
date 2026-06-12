@@ -5,8 +5,9 @@
 > security signals (Policy + Behavioral + Content), and pauses risky actions for
 > real-time human approval. Open-Core distribution.
 
-**Status:** M1–M5 shipped (2026-06; on `main`). Engine + 4 signals + risk + investigation UI + replay +
-terminal-first approval + multi-agent adapters. Publish-ready v0.1.0 (Apache-2.0); `npm publish` pending.
+**Status:** M1–M6 shipped (2026-06; on `main`). Engine + 4 signals + risk + investigation UI + replay +
+terminal-first approval + multi-agent adapters + DLP depth (sensitive paths, egress destination policy,
+egress content-match with provenance). Publish-ready v0.1.0 (Apache-2.0); `npm publish` pending.
 **Owner:** Adir
 
 ---
@@ -250,8 +251,22 @@ Pricing hypothesis: **$49/mo** small team · **$299/mo** mid team (by # agents /
   **adapters 22/22 + init 20/20; full regression unit 146 / e2e 36 green; each agent live-verified
   (ask vs hold, benign, apply_patch→WRITE).** *Codex/Cursor/Cline hook formats follow published specs —
   flagged for live re-verification per agent release.*
+- **Data-protection depth (rules round): ✅ DONE.** Sensitive-path protection (SSH/AWS/GPG/kube keys,
+  credential files, /etc/passwd → HITL, by path and shell command); egress destination policy
+  (`allow-egress-trusted` registries/GitHub/OpenAI/Anthropic → ALLOW; `hitl-egress-suspicious` paste
+  sites / webhook catchers / raw-IP → HITL; generic egress HITL catch-all); completed the command
+  policy (chmod 777 / a+rwx / icacls, kill -9 / killall / taskkill /f / Stop-Process -Force → HITL).
+  All in `rules/default_policy.yaml` (data); `policy.test` 17→31. (Rate-limiting/runaway already covered
+  by the Behavioral signal.)
+- **M6 — Egress content-match: ✅ DONE.** `brainstorms/m6-egress-content-match.md` (D47–D49). Upgrades
+  the exfil gate from coarse session-taint to a precise **content-match**: `inspect()` captures the secret
+  VALUE + provenance into session memory (raw value NEVER persisted — only a sha256 prefix leaves memory,
+  dropped on reset/SessionEnd); `evaluate()` scans the OUTBOUND payload (raw + base64 + hex + url-encoded)
+  for a loaded secret → `content-exfil-match` (weight 120 → strong HITL, BLOCK only when stacked, D47) with
+  a provenance reason (type, source `<tool> <path>:<line>`, sha256, confidence, destination). Risk weights
+  → `m3c-risk-v1.1`. content.test 8→12; live-verified over HTTP (reason never carries the raw value).
 - **Post-MVP / Paid:** cloud + Slack + multi-seat + retention; AgentDojo Score; Langfuse;
-  Cedar adapter; BYO-LLM intent layer; exfil content-match upgrade; $-budget via LLM-proxy.
+  Cedar adapter; BYO-LLM intent layer; PII detection + redaction + encoding-decode DLP; $-budget via LLM-proxy.
 
 ---
 
