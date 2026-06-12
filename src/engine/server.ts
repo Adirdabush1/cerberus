@@ -60,6 +60,12 @@ export interface EngineOptions {
   weightsPath: string;
   /** If set, serve the built dashboard (static files) from this dir at `/` (D20). */
   staticDir?: string;
+  /**
+   * Where a held (HITL) call is approved (M4-C). 'terminal' (default) ⇒ return ASK so Claude Code
+   * prompts the user natively in the terminal — no socket hold. 'dashboard' ⇒ hold the socket and
+   * resolve via the dashboard / `agentguard approve`.
+   */
+  approvalSurface?: 'terminal' | 'dashboard';
   /** Auto-open the investigation UI on severe verdicts (M4-C, D39). 'block' ⇒ on BLOCK/EXFIL; 'off' ⇒ never. */
   autoOpen?: 'block' | 'off';
   /** Opener injection seam (tests pass a spy); defaults to the platform browser-opener. */
@@ -212,7 +218,15 @@ export class Engine {
       return json(res, 200, { action, reason, band: risk.band, sessionId: call.sessionId });
     }
 
-    // HITL: build a violation, hold the socket, and wait for a verdict.
+    // HITL — terminal surface (default): don't hold. Return ASK so the hook can defer to Claude Code's
+    // NATIVE in-terminal permission prompt (M4-C). The held call is still recorded for the timeline; the
+    // approve/deny happens in the terminal, so the engine doesn't own the outcome here.
+    if ((this.opts.approvalSurface ?? 'terminal') === 'terminal') {
+      this.writeAudit({ ...base, event: 'hitl-opened', reason });
+      return json(res, 200, { action: 'ASK', reason, band: risk.band, sessionId: call.sessionId });
+    }
+
+    // HITL — dashboard surface: build a violation, hold the socket, and wait for a verdict.
     const violation: SecurityViolation = {
       id: requestId,
       toolCall: call,
@@ -237,16 +251,18 @@ export class Engine {
     const result = await this.store.registerContext(violation, this.opts.ttlMs);
     settled = true;
 
+    // The store only ever resolves a hold to ALLOW/BLOCK (never ASK) — narrow for the audit/verdict.
+    const resolved = result.action as FinalAction;
     this.writeAudit({
       ...base,
       event: 'hitl-resolved',
-      action: result.action,
+      action: resolved,
       reason: result.reason,
       viaHitl: true,
-      resolution: resolutionOf(result.action, result.reason),
+      resolution: resolutionOf(resolved, result.reason),
       latencyMs: Date.now() - violation.createdAt,
     });
-    if (result.action === 'BLOCK') this.maybeAutoOpen(call.sessionId, risk.band);
+    if (resolved === 'BLOCK') this.maybeAutoOpen(call.sessionId, risk.band);
     if (!res.writableEnded) json(res, 200, { ...result, band: risk.band, sessionId: call.sessionId });
   }
 

@@ -27,8 +27,27 @@ agentguard init                 # project-level   (--global for ~/.claude, --pri
 agentguard engine               # then open http://127.0.0.1:9000/
 ```
 
-Use Claude Code as usual — tool calls now route through AgentGuard. A blocked or held call is
-announced **in your terminal**; resolve a held call from the terminal or the dashboard:
+Use Claude Code as usual — tool calls now route through AgentGuard. By default a held (HITL) call is
+**approved right in the terminal**: AgentGuard returns `ask`, so Claude Code shows its native
+permission prompt with AgentGuard's reason — approve/deny without leaving your session.
+
+The dashboard (`http://127.0.0.1:9000/`) has a **Live** tab (Action Center + stream) and a
+**Sessions** tab — a forensic timeline per session with a risk-factor breakdown and a **Replay**
+player to step through how a session's risk built up.
+
+## Terminal-first approvals
+AgentGuard runs *inside* the agent's execution loop, so the terminal is the realtime decision point
+and the dashboard is the deep dive. Per severity (default `AG_APPROVAL_SURFACE=terminal`):
+
+| verdict | terminal | web UI |
+|---|---|---|
+| **BLOCK** | ⛔ denied in-terminal (Claude shows the reason) + optional auto-open | forensics |
+| **HITL** | ✋ **Claude's native permission prompt**, with AgentGuard's reason | forensics |
+| **AUDIT** | — (quiet) | elevated-risk record |
+| **ALLOW** | — (silent) | — |
+
+Prefer a central web queue instead? Set **`AG_APPROVAL_SURFACE=dashboard`** — held calls then pause on
+the engine's synchronous hold and you Approve/Deny from the dashboard (or the terminal, out-of-band):
 
 ```bash
 agentguard pending              # list calls held for review (with their ids)
@@ -36,28 +55,13 @@ agentguard approve <id>         # release a held call …
 agentguard deny <id>            # … or deny it
 ```
 
-The dashboard (`http://127.0.0.1:9000/`) has a **Live** tab (Action Center + stream) and a
-**Sessions** tab — a forensic timeline per session with a risk-factor breakdown and a **Replay**
-player to step through how a session's risk built up.
-
-## Terminal-first alerts & approvals
-AgentGuard runs *inside* the agent's execution loop, so the terminal is the realtime decision point
-and the dashboard is the deep dive. Per severity:
-
-| verdict | terminal | web UI |
-|---|---|---|
-| **BLOCK** | ⛔ alert + session link | optional auto-open |
-| **HITL** (held) | ⏸ notice → `agentguard pending` + link | reachable via the link |
-| **AUDIT** | — (quiet) | elevated-risk record |
-| **ALLOW** | — (silent) | — |
-
-Alerts write to the controlling terminal (`/dev/tty`, falling back to stderr) so the protocol channel
-to Claude Code stays clean. Tune via env:
+Extra terminal alerts write to the controlling terminal (`/dev/tty`, falling back to stderr) so the
+protocol channel to Claude Code stays clean. Tune via env:
 
 | env | default | effect |
 |---|---|---|
-| `AG_NOTIFY` | `1` | terminal notifications on/off (`0` to silence) |
-| `AG_APPROVAL_SURFACE` | `both` | `terminal` · `dashboard` · `both` |
+| `AG_NOTIFY` | `1` | extra terminal alert lines on/off (`0` to silence) |
+| `AG_APPROVAL_SURFACE` | `terminal` | `terminal` ⇒ HITL via Claude's native prompt; `dashboard` ⇒ socket hold + dashboard approve |
 | `AG_AUTO_OPEN` | `off` | `block` ⇒ auto-open the investigation UI on a BLOCK/EXFIL |
 
 ## How it plugs in

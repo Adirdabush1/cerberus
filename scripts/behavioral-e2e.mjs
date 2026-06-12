@@ -90,6 +90,8 @@ const engine = spawn(process.execPath, ['--import', 'tsx', 'src/cli/index.ts', '
     AG_ENGINE_PORT: String(PORT),
     AG_TTL_MS: String(TTL_MS),
     AG_AUDIT: auditFile,
+    AG_APPROVAL_SURFACE: 'dashboard', // these e2e exercise the socket-hold approval path
+
     AG_MAX_REPEAT: String(MAX_REPEAT),
     AG_HARD_MULT: String(HARD_MULT),
     AG_MAX_RATE: '1000', // disable the rate signal so we isolate the loop signal

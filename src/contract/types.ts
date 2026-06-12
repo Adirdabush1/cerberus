@@ -103,9 +103,15 @@ export interface SessionEvent {
   source?: string; // SessionStart `source` (startup | resume | clear), if provided
 }
 
-/** The final, binary verdict returned to the hook (and thus to the agent). */
+/**
+ * The verdict returned to the hook. ALLOW/BLOCK are final; ASK defers to Claude Code's NATIVE
+ * in-terminal permission prompt (M4-C terminal approval) — the hook maps it to permissionDecision:"ask".
+ */
+export type HookVerdict = 'ALLOW' | 'BLOCK' | 'ASK';
+
+/** The verdict returned to the hook (and thus to the agent). */
 export interface PipelineResult {
-  action: FinalAction;
+  action: HookVerdict;
   reason: string;
   violationId?: string;
   band?: RiskBand; //   severity for the hook's terminal notification (M4-C); absent ⇒ treat as ALLOW

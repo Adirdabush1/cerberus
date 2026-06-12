@@ -82,7 +82,7 @@ async function heldDecision(call, action) {
 console.log('AgentGuard M3b injection e2e — "caught the poisoned README"\n');
 
 const engine = spawn(process.execPath, ['--import', 'tsx', 'src/cli/index.ts', 'engine'], {
-  env: { ...process.env, AG_ENGINE_PORT: String(PORT), AG_TTL_MS: String(TTL_MS), AG_AUDIT: auditFile },
+  env: { ...process.env, AG_ENGINE_PORT: String(PORT), AG_TTL_MS: String(TTL_MS), AG_AUDIT: auditFile, AG_APPROVAL_SURFACE: 'dashboard' },
   stdio: ['ignore', 'ignore', 'inherit'],
 });
 

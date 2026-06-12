@@ -33,9 +33,9 @@ const ENGINE_PORT = Number(process.env.AG_ENGINE_PORT ?? 9000);
 const FAIL_OPEN = process.env.AG_FAIL_OPEN === '1';
 
 // M4-C terminal notifications. The hook runs in the agent's terminal, so its alerts reach the human
-// watching the agent. Gated by AG_NOTIFY (default on) and AG_APPROVAL_SURFACE (terminal|dashboard|both).
-const SURFACE = process.env.AG_APPROVAL_SURFACE ?? 'both';
-const TERMINAL_NOTIFY = process.env.AG_NOTIFY !== '0' && (SURFACE === 'terminal' || SURFACE === 'both');
+// watching the agent. On by default; AG_NOTIFY=0 silences. (HITL approval itself is handled by the
+// engine's surface choice: terminal ⇒ ASK→native prompt; dashboard ⇒ socket hold.)
+const TERMINAL_NOTIFY = process.env.AG_NOTIFY !== '0';
 const HELD_NOTICE_MS = Number(process.env.AG_HELD_NOTICE_MS ?? 400); // a slower /intercept ⇒ it's held (D41)
 
 // The controlling-terminal device: `\\.\CON` on Windows, `/dev/tty` on POSIX.
@@ -62,7 +62,7 @@ function sessionLink(sessionId?: string): string {
   return sessionId ? `  ·  http://${ENGINE_HOST}:${ENGINE_PORT}/?session=${encodeURIComponent(sessionId)}` : '';
 }
 
-function emitPre(decision: 'allow' | 'deny', reason: string): never {
+function emitPre(decision: 'allow' | 'deny' | 'ask', reason: string): never {
   process.stdout.write(
     JSON.stringify({
       hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: decision, permissionDecisionReason: reason },
@@ -137,8 +137,11 @@ async function handlePre(event: HookEvent): Promise<never> {
   try {
     const result = await post<PipelineResult>('/intercept', call);
     clearTimeout(heldTimer);
+    // Terminal approval (M4-C): the engine returned ASK — defer to Claude Code's NATIVE in-terminal
+    // permission prompt, carrying our reason. No dashboard, no hold.
+    if (result.action === 'ASK') emitPre('ask', result.reason);
     if (held) {
-      // a held call that resolved — report the outcome
+      // a held call (dashboard surface) that resolved — report the outcome
       notify(result.action === 'ALLOW' ? `✓ AgentGuard: approved ${call.tool}` : `⛔ AgentGuard: denied ${call.tool}`);
     } else if (result.action === 'BLOCK') {
       // an immediate auto-block (the headline alert)

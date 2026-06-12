@@ -41,6 +41,9 @@ async function run() {
     try {
       const r1 = (await intercept(9351, block('X'))) as { action: string; band: string; sessionId: string };
       check('BLOCK response carries band + sessionId', r1.action === 'BLOCK' && r1.band === 'BLOCK' && r1.sessionId === 'X', JSON.stringify(r1));
+      // M4-C terminal approval: a HITL call returns ASK (no hold) so the hook can use Claude's native prompt.
+      const gp = (await intercept(9351, { tool: 'Bash', input: { command: 'git push origin main' }, sessionId: 'gp' })) as { action: string; band: string };
+      check('HITL → ASK in terminal mode (no socket hold)', gp.action === 'ASK' && gp.band === 'HITL', JSON.stringify(gp));
       await intercept(9351, block('X')); // same session within window → deduped
       check('auto-open fired once for session X (deduped within window)', opened.length === 1, JSON.stringify(opened));
       check('opened url deep-links the session', opened[0]?.includes('/?session=X') ?? false, opened[0]);

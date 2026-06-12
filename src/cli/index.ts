@@ -46,8 +46,10 @@ async function runEngine(): Promise<void> {
   const staticDir = existsSync(join(dashboardDist, 'index.html')) ? dashboardDist : undefined;
 
   const autoOpen = process.env.AG_AUTO_OPEN === 'block' ? 'block' : 'off'; // M4-C D39 — default off
+  // M4-C: terminal approval (HITL → Claude's native in-terminal prompt) by default; dashboard-hold opt-in.
+  const approvalSurface = process.env.AG_APPROVAL_SURFACE === 'dashboard' ? 'dashboard' : 'terminal';
 
-  const engine = new Engine({ port, rulesPath, auditFile, ttlMs, behavioral, content, injection, weightsPath, staticDir, autoOpen });
+  const engine = new Engine({ port, rulesPath, auditFile, ttlMs, behavioral, content, injection, weightsPath, staticDir, autoOpen, approvalSurface });
   await engine.listen();
   process.stderr.write(
     `AgentGuard engine listening on :${port}\n` +
@@ -56,6 +58,7 @@ async function runEngine(): Promise<void> {
       `  content: secret-scan ${content.scanLimitBytes}B/result, path-risk TTL ${content.pathRiskTtlMs}ms → exfil HITL\n` +
       `  injection: classifier=${engine.injectionClassifier} (threshold ${injection.threshold}) → posture HITL on egress\n` +
       `  risk: ${weightsPath} (${engine.riskVersion}) → ALLOW/AUDIT/HITL/BLOCK bands\n` +
+      `  approval: ${approvalSurface === 'terminal' ? "terminal — HITL → Claude's native prompt (ASK)" : 'dashboard — socket hold + Approve/Deny'}\n` +
       `  auto-open: ${autoOpen === 'block' ? 'on BLOCK/EXFIL' : 'off (set AG_AUTO_OPEN=block)'}\n` +
       `  dashboard: ${staticDir ? `http://127.0.0.1:${port}/` : '(not built — run `npm run build`)'}  ·  WS ws://127.0.0.1:${port}/ws\n`,
   );
