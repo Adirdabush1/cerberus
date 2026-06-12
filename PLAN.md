@@ -5,7 +5,8 @@
 > security signals (Policy + Behavioral + Content), and pauses risky actions for
 > real-time human approval. Open-Core distribution.
 
-**Status:** Planning complete (grill phase closed 2026-06-08). No production code yet.
+**Status:** M1–M5 shipped (2026-06; on `main`). Engine + 4 signals + risk + investigation UI + replay +
+terminal-first approval + multi-agent adapters. Publish-ready v0.1.0 (Apache-2.0); `npm publish` pending.
 **Owner:** Adir
 
 ---
@@ -226,10 +227,29 @@ Pricing hypothesis: **$49/mo** small team · **$299/mo** mid team (by # agents /
   API/WS routes take precedence). **`agentguard init`** safely merges the Pre/PostToolUse hooks into
   `.claude/settings.json` (idempotent + backup; `--global`, `--print`). package.json `files` +
   `prepublishOnly`; README rewritten (install → init → run → demo). **13/13 init unit + full
-  regression 99/99 green** incl. compiled-engine smoke. *Deferred: Investigation UI (B), Policy Editor
-  + `approval_surface` (C), actual `npm publish` (gated on THIRD_PARTY_NOTICES).* *Goal: install in a minute — met.*
-- **M5 — Multi-agent support:** adapters beyond Claude Code (OpenAI Codex, Cursor, Roo, Cline) feeding
-  the same agent-agnostic engine via the hook/MCP-proxy adapter layer.
+  regression 99/99 green** incl. compiled-engine smoke. *Goal: install in a minute — met. Follow-ups
+  since done: Investigation UI (B) → M4-B; `approval_surface` (C) → M4-C. Still open: a Policy Editor UI,
+  and the actual `npm publish` (everything is publish-ready — Apache-2.0 + THIRD_PARTY_NOTICES — just not pushed).*
+- **M4-B — Investigation UI: ✅ DONE.** `brainstorms/m4b-investigation-ui.md` (D22–D30). Event-sourced
+  audit log (closed `event` enum + `requestId`/`sessionId` + runtime validation gate); `/sessions` +
+  `/sessions/:id/timeline` read API; shared projector (open→resolve correlation + session "drivers");
+  dashboard **Live / Sessions** tabs with a timeline, risk-factor breakdown, filters, and a **Replay**
+  player. SessionStart/SessionEnd hooks reset monitors.
+- **M4-C — Terminal-first notifications + approval: ✅ DONE.** `brainstorms/m4c-notification-tiers.md`
+  (D34–D41). Terminal alerts via `/dev/tty` (stderr fallback); `agentguard pending|approve|deny` CLI;
+  engine-side auto-open (`AG_AUTO_OPEN`). **HITL approval is terminal-native by default** via Claude
+  Code's `permissionDecision:"ask"` (`AG_APPROVAL_SURFACE=terminal|dashboard`). This was the deferred
+  M4 (C) `approval_surface`. Security: Origin allowlist on `/ws` + `/decision` (CSWSH fix). Cross-platform
+  (Windows/POSIX). Published-ready: Apache-2.0 + THIRD_PARTY_NOTICES + npm metadata (v0.1.0).
+- **M5 — Multi-agent support: ✅ DONE (core).** `brainstorms/m5-multi-agent.md` (D42–D46). One
+  `agentguard hook --agent <claude|codex|cursor|cline>` binary over a pure per-agent adapter layer
+  (`src/hook/adapters.ts`); engine/signals/risk/dashboard unchanged. ASK-vs-HOLD is a per-agent
+  capability (claude/cursor → native prompt; codex/cline → dashboard hold) signaled via
+  `MCPToolCall.approvalMode`. `agentguard init --agent <name>` writes each agent's config shape/location
+  (+ fail-closed). MCP-proxy rejected (can't see internal shell/edit tools); Roo excluded (archived 2026).
+  **adapters 22/22 + init 20/20; full regression unit 146 / e2e 36 green; each agent live-verified
+  (ask vs hold, benign, apply_patch→WRITE).** *Codex/Cursor/Cline hook formats follow published specs —
+  flagged for live re-verification per agent release.*
 - **Post-MVP / Paid:** cloud + Slack + multi-seat + retention; AgentDojo Score; Langfuse;
   Cedar adapter; BYO-LLM intent layer; exfil content-match upgrade; $-budget via LLM-proxy.
 
