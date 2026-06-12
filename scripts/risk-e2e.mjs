@@ -66,7 +66,7 @@ async function waitForEngine(timeoutMs = 8000) {
   return false;
 }
 
-console.log('AgentGuard M3c risk-engine e2e — the four bands\n');
+console.log('Cerberus M3c risk-engine e2e — the four bands\n');
 
 const engine = spawn(process.execPath, ['--import', 'tsx', 'src/cli/index.ts', 'engine'], {
   env: { ...process.env, AG_ENGINE_PORT: String(PORT), AG_TTL_MS: '800', AG_AUDIT: auditFile, AG_RULES: rulesPath, AG_MAX_RATE: '3', AG_APPROVAL_SURFACE: 'dashboard' },

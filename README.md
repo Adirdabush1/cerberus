@@ -134,7 +134,7 @@ split-across-calls encoding). Honest defaults over false guarantees.
 
 ## Local-first & licensing
 No external API, no API key, nothing leaves the machine. The optional injection model
-([`@agentguard/injection-model`](packages/injection-model), ProtectAI DeBERTa, Apache-2.0) upgrades
+([`@cerberussec/injection-model`](packages/injection-model), ProtectAI DeBERTa, Apache-2.0) upgrades
 the built-in heuristic classifier; install it only if you want it. The core is OSS-clean
 (Apache/MIT-compatible deps); Meta Prompt-Guard is deliberately kept out of core (Llama license).
 

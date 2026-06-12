@@ -1,16 +1,16 @@
-# @agentguard/injection-model
+# @cerberussec/injection-model
 
-Optional ONNX prompt-injection classifier for [AgentGuard](../../). Installing it upgrades the
-injection signal (M3b) from AgentGuard's built-in **heuristic baseline** to a local **ONNX model**
+Optional ONNX prompt-injection classifier for [Cerberus](../../). Installing it upgrades the
+injection signal (M3b) from Cerberus's built-in **heuristic baseline** to a local **ONNX model**
 ([ProtectAI `deberta-v3-base-prompt-injection-v2`](https://huggingface.co/protectai/deberta-v3-base-prompt-injection-v2),
 Apache-2.0) for broader coverage.
 
 ```bash
 npm install agentguard            # lean core — heuristic injection baseline, zero native deps
-npm install @agentguard/injection-model   # opt-in ONNX upgrade
+npm install @cerberussec/injection-model   # opt-in ONNX upgrade
 ```
 
-AgentGuard auto-detects this package on startup and uses it instead of the heuristic (the engine
+Cerberus auto-detects this package on startup and uses it instead of the heuristic (the engine
 banner shows `classifier=onnx:protectai-deberta-v3`). If it isn't installed, the heuristic baseline
 keeps working — nothing breaks.
 
@@ -25,7 +25,7 @@ leaves the machine at runtime.
 
 ## Status
 
-⚠️ **Scaffold — not exercised by AgentGuard's automated tests.** The adapter code is real, but live
+⚠️ **Scaffold — not exercised by Cerberus's automated tests.** The adapter code is real, but live
 inference needs the ~180MB model + the native `onnxruntime-node` binary. Verify on your target
 hardware and measure CPU latency before relying on it.
 

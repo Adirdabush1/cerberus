@@ -1,5 +1,5 @@
 {
-  "//": "Example Claude Code hook registration for AgentGuard. Copy into your project's .claude/settings.json (or merge the `hooks` block). Replace /ABSOLUTE/PATH/TO/agentguard with the real path to this repo. Start the engine first: `npm run engine`.",
+  "//": "Example Claude Code hook registration for Cerberus. Copy into your project's .claude/settings.json (or merge the `hooks` block). Replace /ABSOLUTE/PATH/TO/cerberus with the real path to this repo. Start the engine first: `npm run engine`.",
   "//pretooluse": "PreToolUse is the hard gate (allow/deny). Its timeout MUST be >= the engine's HITL TTL (default 300000ms) so a human has time to decide — set it a little higher.",
   "//posttooluse": "PostToolUse feeds tool results to the contamination engine. It never blocks; keep its timeout tight (content scan is sub-ms). The SAME command serves both events — the hook routes by hook_event_name internally.",
   "hooks": {
@@ -7,7 +7,7 @@
       {
         "matcher": "*",
         "hooks": [
-          { "type": "command", "command": "node /ABSOLUTE/PATH/TO/agentguard/bin/agentguard.mjs hook", "timeout": 310 }
+          { "type": "command", "command": "node /ABSOLUTE/PATH/TO/cerberus/bin/cerberus.mjs hook", "timeout": 310 }
         ]
       }
     ],
@@ -15,7 +15,7 @@
       {
         "matcher": "*",
         "hooks": [
-          { "type": "command", "command": "node /ABSOLUTE/PATH/TO/agentguard/bin/agentguard.mjs hook", "timeout": 10 }
+          { "type": "command", "command": "node /ABSOLUTE/PATH/TO/cerberus/bin/cerberus.mjs hook", "timeout": 10 }
         ]
       }
     ]

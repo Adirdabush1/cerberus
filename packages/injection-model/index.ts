@@ -1,12 +1,12 @@
 /**
- * @agentguard/injection-model — the optional ONNX injection classifier (D10/D13).
+ * @cerberussec/injection-model — the optional ONNX injection classifier (D10/D13).
  *
  * ⚠️ STATUS: companion-package scaffold. The adapter code is real, but it is NOT exercised by
- * AgentGuard's automated test suite — running it requires downloading the ~180MB ProtectAI ONNX model
+ * Cerberus's automated test suite — running it requires downloading the ~180MB ProtectAI ONNX model
  * and the native `onnxruntime-node` binary. Verify live, on the target hardware, before relying on it
  * (and measure CPU latency — Risk #2).
  *
- * Contract: AgentGuard's core calls `loadInjectionClassifier()`, which dynamically imports this
+ * Contract: Cerberus's core calls `loadInjectionClassifier()`, which dynamically imports this
  * package and calls `createClassifier(cfg)`. We return a structurally-compatible `InjectionClassifier`:
  *   { available: boolean; name: string; classify(text): Promise<{ score, label }> }
  *

@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * `agentguard` launcher. Prefers the compiled CLI in `dist/` (published package); falls back to
+ * `cerberus` launcher. Prefers the compiled CLI in `dist/` (published package); falls back to
  * running the TypeScript source via tsx when `dist/` is absent (local dev). Either way it exports
  * AG_HOME = the package root so the CLI can resolve bundled resources (rules/, dashboard/dist/)
  * consistently whether it runs from src/ or dist/.

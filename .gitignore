@@ -4,5 +4,5 @@ dist/
 .env.*
 *.log
 .DS_Store
-.agentguard/
+.cerberus/
 *.tgz

@@ -1,6 +1,6 @@
 # Third-Party Notices
 
-AgentGuard (Apache-2.0) redistributes and depends on the third-party software below. Each remains
+Cerberus (Apache-2.0) redistributes and depends on the third-party software below. Each remains
 under its own license. This file satisfies the attribution requirements of those licenses.
 
 ## Bundled in the shipped package (`dashboard/dist/`)
@@ -22,7 +22,7 @@ Build-time-only tooling (TypeScript, Vite, Tailwind CSS, tsx, type stubs) is **n
 the published package and is therefore not listed here.
 
 ## Optional companion (NOT part of this package)
-- **`@agentguard/injection-model`** — ProtectAI `deberta-v3-base-prompt-injection` ONNX weights,
+- **`@cerberussec/injection-model`** — ProtectAI `deberta-v3-base-prompt-injection` ONNX weights,
   **Apache-2.0**. Installed separately and only if the user opts in; it upgrades the built-in heuristic
   injection classifier. Its own NOTICE/LICENSE ships with that package.
 

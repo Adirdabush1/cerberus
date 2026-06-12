@@ -82,7 +82,7 @@ async function waitForEngine(timeoutMs = 8000) {
   return false;
 }
 
-console.log('AgentGuard M2 behavioral e2e — "caught a loop"\n');
+console.log('Cerberus M2 behavioral e2e — "caught a loop"\n');
 
 const engine = spawn(process.execPath, ['--import', 'tsx', 'src/cli/index.ts', 'engine'], {
   env: {

@@ -1,7 +1,7 @@
 // End-to-end proof of the M3b injection signal — "caught the poisoned README".
 //
 // Boots its own Engine subprocess (the heuristic baseline classifier activates automatically, since
-// the optional @agentguard/injection-model package isn't installed), then drives the real HTTP surface:
+// the optional @cerberussec/injection-model package isn't installed), then drives the real HTTP surface:
 //   1. PostToolUse /inspect of a tool result CONTAINING a prompt-injection (no secret) → session
 //      posture is raised (injectionFlagged), audited as signal:'content' / content-injection-detected.
 //   2. PreToolUse /intercept of an egress call on that session → held for review, attributed to
@@ -79,7 +79,7 @@ async function heldDecision(call, action) {
   return { violation: v, result: res.json };
 }
 
-console.log('AgentGuard M3b injection e2e — "caught the poisoned README"\n');
+console.log('Cerberus M3b injection e2e — "caught the poisoned README"\n');
 
 const engine = spawn(process.execPath, ['--import', 'tsx', 'src/cli/index.ts', 'engine'], {
   env: { ...process.env, AG_ENGINE_PORT: String(PORT), AG_TTL_MS: String(TTL_MS), AG_AUDIT: auditFile, AG_APPROVAL_SURFACE: 'dashboard' },

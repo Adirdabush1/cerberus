@@ -82,7 +82,7 @@ async function heldDecision(call, action) {
   return { violation: v, result: res.json };
 }
 
-console.log('AgentGuard M3a content e2e — "caught the exfil"\n');
+console.log('Cerberus M3a content e2e — "caught the exfil"\n');
 
 const engine = spawn(process.execPath, ['--import', 'tsx', 'src/cli/index.ts', 'engine'], {
   env: { ...process.env, AG_ENGINE_PORT: String(PORT), AG_TTL_MS: String(TTL_MS), AG_AUDIT: auditFile, AG_APPROVAL_SURFACE: 'dashboard' },

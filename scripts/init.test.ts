@@ -1,4 +1,4 @@
-// Unit test for `agentguard init` (run: npx tsx scripts/init.test.ts).
+// Unit test for `cerberus init` (run: npx tsx scripts/init.test.ts).
 import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -41,7 +41,7 @@ try {
     const s = read(sp);
     const cmd = s.hooks?.PreToolUse?.[0]?.hooks?.[0]?.command ?? '';
     // path is quoted (Windows spaces) and may use either separator; command tags the agent (M5)
-    check('PreToolUse hook wired (node "…/agentguard.mjs" hook --agent claude)', /agentguard\.mjs"? hook --agent claude$/.test(cmd), cmd);
+    check('PreToolUse hook wired (node "…/cerberus.mjs" hook --agent claude)', /cerberus\.mjs"? hook --agent claude$/.test(cmd), cmd);
     check('PostToolUse hook wired', !!s.hooks?.PostToolUse?.[0]?.hooks?.[0]?.command);
     check('PreToolUse timeout >= 300 (>= engine TTL)', s.hooks.PreToolUse[0].hooks[0].timeout >= 300);
     check('SessionStart hook wired', !!s.hooks?.SessionStart?.[0]?.hooks?.[0]?.command);
@@ -92,7 +92,7 @@ try {
 
     quiet(() => runInit(['--agent', 'codex']));
     const codex = read(join(dir, '.codex', 'hooks.json'));
-    check('codex: writes .codex/hooks.json with PreToolUse', /agentguard\.mjs"? hook --agent codex$/.test(codex.hooks?.PreToolUse?.[0]?.hooks?.[0]?.command ?? ''));
+    check('codex: writes .codex/hooks.json with PreToolUse', /cerberus\.mjs"? hook --agent codex$/.test(codex.hooks?.PreToolUse?.[0]?.hooks?.[0]?.command ?? ''));
 
     quiet(() => runInit(['--agent', 'cursor']));
     const cursor = read(join(dir, '.cursor', 'hooks.json'));

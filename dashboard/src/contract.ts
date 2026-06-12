@@ -1,5 +1,5 @@
 /**
- * AgentGuard data contract — COPIED VERBATIM from `src/contract/types.ts` in the engine.
+ * Cerberus data contract — COPIED VERBATIM from `src/contract/types.ts` in the engine.
  *
  * Single source of truth lives in the engine package; this copy keeps the dashboard
  * decoupled at the build level (no workspaces, no shared tsconfig) while preventing

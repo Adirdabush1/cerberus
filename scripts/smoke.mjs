@@ -1,4 +1,4 @@
-// End-to-end smoke test for the AgentGuard Engine. Assumes an engine is running
+// End-to-end smoke test for the Cerberus Engine. Assumes an engine is running
 // on AG_ENGINE_PORT (default 9000) with a short AG_TTL_MS so the timeout path is fast.
 import { request } from 'node:http';
 
@@ -24,7 +24,7 @@ function check(name, cond, detail) {
   else { fail++; console.log(`  ❌ ${name} — ${detail}`); }
 }
 
-console.log('AgentGuard engine smoke test\n');
+console.log('Cerberus engine smoke test\n');
 
 // A) auto-allow
 let r = await intercept({ tool: 'Bash', input: { command: 'ls -la' } });

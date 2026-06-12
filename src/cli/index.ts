@@ -12,7 +12,7 @@ import { DEFAULT_CONTENT_CONFIG } from '../signals/content.js';
 import { DEFAULT_INJECTION_CONFIG } from '../signals/injection.js';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
-// AG_HOME (set by bin/agentguard.mjs) is the package root, so bundled resources resolve whether the
+// AG_HOME (set by bin/cerberus.mjs) is the package root, so bundled resources resolve whether the
 // CLI runs from src/ (tsx dev) or dist/ (published). Fall back to two-up from this file for direct runs.
 const PROJECT_ROOT = process.env.AG_HOME ?? resolve(HERE, '..', '..');
 
@@ -20,7 +20,7 @@ async function runEngine(): Promise<void> {
   const port = Number(process.env.AG_ENGINE_PORT ?? 9000);
   const rulesPath = process.env.AG_RULES ?? join(PROJECT_ROOT, 'rules', 'default_policy.yaml');
   const weightsPath = process.env.AG_RISK_WEIGHTS ?? join(PROJECT_ROOT, 'rules', 'risk_weights.yaml');
-  const auditFile = process.env.AG_AUDIT ?? join(PROJECT_ROOT, '.agentguard', 'audit.jsonl');
+  const auditFile = process.env.AG_AUDIT ?? join(PROJECT_ROOT, '.cerberus', 'audit.jsonl');
   const ttlMs = Number(process.env.AG_TTL_MS ?? 300_000); // 5 min default — NOT 60s
   const behavioral = {
     windowMs: Number(process.env.AG_WINDOW_MS ?? DEFAULT_ANOMALY_CONFIG.windowMs),

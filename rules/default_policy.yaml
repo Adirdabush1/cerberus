@@ -1,4 +1,4 @@
-# AgentGuard — default policy (V1).
+# Cerberus — default policy (V1).
 #
 # This is DATA, not code. Edit it freely; no rebuild required.
 # Rules are evaluated top-to-bottom and the FIRST match wins.

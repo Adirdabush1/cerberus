@@ -29,7 +29,7 @@
     "mcp"
   ],
   "bin": {
-    "cerberus": "bin/agentguard.mjs"
+    "cerberus": "bin/cerberus.mjs"
   },
   "files": [
     "dist",
