@@ -64,12 +64,26 @@ protocol channel to Claude Code stays clean. Tune via env:
 | `AG_APPROVAL_SURFACE` | `terminal` | `terminal` ⇒ HITL via Claude's native prompt; `dashboard` ⇒ socket hold + dashboard approve |
 | `AG_AUTO_OPEN` | `off` | `block` ⇒ auto-open the investigation UI on a BLOCK/EXFIL |
 
+## Agents
+The engine + signals + risk + dashboard are agent-agnostic; only a thin **adapter** (parse the agent's
+hook event → normalize → emit its verdict shape) is per-agent. Wire one with `agentguard init --agent <name>`:
+
+| agent | `--agent` | HITL approval | notes |
+|---|---|---|---|
+| **Claude Code** | `claude` (default) | native terminal prompt (`ask`) | verified end-to-end |
+| **Codex CLI** | `codex` | dashboard hold (no native ask) — `AG_APPROVAL_SURFACE=dashboard` | enterprise `requirements.toml` makes it non-bypassable |
+| **Cursor** | `cursor` | native IDE prompt (`ask`) | init sets `failClosed: true` |
+| **Cline** | `cline` | dashboard hold (`cancel` bool) | macOS/Linux only |
+
+`codex`/`cursor`/`cline` adapters follow the published hook specs; verify against your installed version
+(`agentguard init --agent <name> --print` shows the exact config). Roo Code is unsupported (archived 2026).
+
 ## How it plugs in
-- **PreToolUse hook → `/intercept`** is the single hard enforcement point (allow/deny; HITL holds the
+- **PreToolUse hook → `/intercept`** is the single hard enforcement point (allow/deny/ask; or HITL holds the
   socket open until you decide).
 - **PostToolUse hook → `/inspect`** is observe-only: it updates the session's contamination state so
   the *next* action is judged with full context. It never modifies a tool result.
-- The engine is **agent-agnostic** at its core; the Claude Code hooks are just the first adapter.
+- The engine is **agent-agnostic** at its core; per-agent adapters (`--agent`) are the only thing that differs.
 
 ## Architecture
 ```
@@ -91,7 +105,8 @@ the built-in heuristic classifier; install it only if you want it. The core is O
 npm run engine            # run from source via tsx (dev)
 npm run typecheck
 npm run test:behavioral && npm run test:content && npm run test:injection && npm run test:risk \
-  && npm run test:init && npm run test:projector && npm run test:audit && npm run test:notify && npm run test:security
+  && npm run test:init && npm run test:projector && npm run test:audit && npm run test:notify \
+  && npm run test:security && npm run test:policy && npm run test:adapters
 npm run e2e:behavioral && npm run e2e:content && npm run e2e:injection && npm run e2e:risk
 ```
 See `PLAN.md` for milestones and `brainstorms/` for the design records behind each decision.

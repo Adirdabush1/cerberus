@@ -22,6 +22,7 @@ const KNOWN_TOOLS: Readonly<Record<string, ToolCategory>> = {
   MultiEdit: 'WRITE',
   write_file: 'WRITE',
   NotebookEdit: 'WRITE',
+  apply_patch: 'WRITE', // Codex CLI's file-edit tool
   // execution
   Bash: 'EXECUTE',
   execute_bash: 'EXECUTE',

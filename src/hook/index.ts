@@ -1,51 +1,42 @@
 /**
- * The Claude Code hook — a DUMB CLIENT for both hook events.
+ * The agent hook — a DUMB CLIENT shared across agents (M5). The agent is selected by `--agent <name>`
+ * (or AG_AGENT; default `claude`); a per-agent adapter (./adapters) parses the stdin event and formats
+ * the verdict. The flow is identical everywhere:
  *
- * PreToolUse:  reads the event on stdin, POSTs the tool call to the Engine `/intercept`, and keeps
- *              the HTTP connection open until the Engine answers (the open socket IS the synchronous
- *              hold). It then emits the Claude Code permission decision (allow/deny).
- *              Fail-Closed by default: if the Engine is unreachable, deny — unless AG_FAIL_OPEN=1.
- *
- * PostToolUse: POSTs the executed tool's RESULT to the Engine `/inspect` so the engine can update its
- *              per-session contamination state, then waits only for that state-commit (D9) and exits.
- *              It NEVER modifies the result (contamination model — enforcement is pre-flight, D2).
- *              Best-effort: a PostToolUse hook cannot block, so if the engine is unreachable we simply
- *              let the result through (there is nothing to fail closed).
+ * PreToolUse:  POST the normalized tool call to `/intercept`; the engine answers ALLOW / BLOCK / ASK.
+ *              ASK → defer to the agent's NATIVE approval prompt (agents that support it). For agents
+ *              without a native prompt, the engine HOLDS the socket and a dashboard/CLI decision resolves
+ *              it. Fail-Closed if the engine is unreachable (unless AG_FAIL_OPEN=1).
+ * PostToolUse: POST the result to `/inspect` (observe-only contamination update); never modifies it.
+ * Session*:    POST to `/session` (timeline bookend + monitor reset). Best-effort.
  */
 import { request } from 'node:http';
 import { closeSync, openSync, writeSync } from 'node:fs';
 import type { InspectRequest, MCPToolCall, PipelineResult, SessionEvent } from '../contract/types.js';
-
-interface HookEvent {
-  hook_event_name?: string;
-  tool_name?: string;
-  tool_input?: Record<string, unknown>;
-  tool_response?: unknown;
-  tool_output?: unknown; //  some Claude Code versions/docs name the result field this way
-  error?: unknown; //        present when the tool FAILED instead of returning a result
-  session_id?: string;
-  source?: string; //        SessionStart: startup | resume | clear
-  cwd?: string;
-}
+import { getAdapter, type ParsedEvent, type Verdict } from './adapters.js';
 
 const ENGINE_HOST = process.env.AG_ENGINE_HOST ?? '127.0.0.1';
 const ENGINE_PORT = Number(process.env.AG_ENGINE_PORT ?? 9000);
 const FAIL_OPEN = process.env.AG_FAIL_OPEN === '1';
-
-// M4-C terminal notifications. The hook runs in the agent's terminal, so its alerts reach the human
-// watching the agent. On by default; AG_NOTIFY=0 silences. (HITL approval itself is handled by the
-// engine's surface choice: terminal ⇒ ASK→native prompt; dashboard ⇒ socket hold.)
 const TERMINAL_NOTIFY = process.env.AG_NOTIFY !== '0';
 const HELD_NOTICE_MS = Number(process.env.AG_HELD_NOTICE_MS ?? 400); // a slower /intercept ⇒ it's held (D41)
+
+// Which agent are we adapting? `--agent <name>` (written by `agentguard init`) or AG_AGENT; default claude.
+function selectedAgent(): string | undefined {
+  const i = process.argv.indexOf('--agent');
+  if (i >= 0 && process.argv[i + 1]) return process.argv[i + 1];
+  return process.env.AG_AGENT;
+}
+const adapter = getAdapter(selectedAgent());
+
+// HITL handling: 'ask' if the agent has a native prompt and the user hasn't forced the dashboard;
+// otherwise 'hold' (engine holds the socket, dashboard/CLI resolves).
+const APPROVAL_MODE: 'ask' | 'hold' = adapter.supportsAsk && process.env.AG_APPROVAL_SURFACE !== 'dashboard' ? 'ask' : 'hold';
 
 // The controlling-terminal device: `\\.\CON` on Windows, `/dev/tty` on POSIX.
 const TTY_DEVICE = process.platform === 'win32' ? '\\\\.\\CON' : '/dev/tty';
 
-/**
- * Notify the human in the terminal. stdout is the Claude Code protocol channel (D35), so we write to
- * the controlling terminal directly — falling back to stderr if the device isn't writable (which is
- * the bit to live-verify inside real Claude Code, on both platforms).
- */
+/** Notify the human in the terminal, off the stdout protocol channel — `/dev/tty`, falling back to stderr. */
 function notify(line: string): void {
   if (!TERMINAL_NOTIFY) return;
   const msg = line.endsWith('\n') ? line : line + '\n';
@@ -62,19 +53,12 @@ function sessionLink(sessionId?: string): string {
   return sessionId ? `  ·  http://${ENGINE_HOST}:${ENGINE_PORT}/?session=${encodeURIComponent(sessionId)}` : '';
 }
 
-function emitPre(decision: 'allow' | 'deny' | 'ask', reason: string): never {
-  process.stdout.write(
-    JSON.stringify({
-      hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: decision, permissionDecisionReason: reason },
-    }),
-  );
+function emit(obj: unknown): never {
+  process.stdout.write(JSON.stringify(obj));
   process.exit(0);
 }
-
-/** PostToolUse exit — we deliberately do NOT modify the result; just acknowledge the event. */
-function emitPost(): never {
-  process.stdout.write(JSON.stringify({ hookSpecificOutput: { hookEventName: 'PostToolUse' } }));
-  process.exit(0);
+function emitPre(verdict: Verdict, reason: string): never {
+  emit(adapter.formatPre(verdict, reason));
 }
 
 function readStdin(): Promise<string> {
@@ -111,20 +95,15 @@ function post<T>(path: string, body: unknown): Promise<T> {
         });
       },
     );
-    // Do NOT set a short socket timeout: a PreToolUse hold can last minutes. The outer bound is
-    // Claude Code's hook `timeout` setting (must be >= the Engine's TTL).
+    // Do NOT set a short socket timeout: a hold can last minutes. The outer bound is the agent's hook
+    // `timeout` setting (must be >= the engine's TTL).
     req.on('error', reject);
     req.end(payload);
   });
 }
 
-async function handlePre(event: HookEvent): Promise<never> {
-  const call: MCPToolCall = {
-    tool: event.tool_name ?? 'unknown',
-    input: event.tool_input ?? {},
-    sessionId: event.session_id,
-    cwd: event.cwd,
-  };
+async function handlePre(call: MCPToolCall): Promise<never> {
+  call.approvalMode = APPROVAL_MODE;
 
   // If /intercept is slow to answer, the call is being HELD — tell the human so the agent isn't just
   // silently hung (D41). The specific id isn't known yet, so point at `agentguard pending`.
@@ -137,14 +116,12 @@ async function handlePre(event: HookEvent): Promise<never> {
   try {
     const result = await post<PipelineResult>('/intercept', call);
     clearTimeout(heldTimer);
-    // Terminal approval (M4-C): the engine returned ASK — defer to Claude Code's NATIVE in-terminal
-    // permission prompt, carrying our reason. No dashboard, no hold.
+    // ASK → the engine wants the agent's native prompt. The adapter formats it (e.g. permissionDecision
+    // "ask" for Claude, permission "ask" for Cursor).
     if (result.action === 'ASK') emitPre('ask', result.reason);
     if (held) {
-      // a held call (dashboard surface) that resolved — report the outcome
       notify(result.action === 'ALLOW' ? `✓ AgentGuard: approved ${call.tool}` : `⛔ AgentGuard: denied ${call.tool}`);
     } else if (result.action === 'BLOCK') {
-      // an immediate auto-block (the headline alert)
       notify(`⛔ AgentGuard BLOCKED ${call.tool} · ${result.reason}${sessionLink(result.sessionId ?? call.sessionId)}`);
     } // auto ALLOW / AUDIT → silent in the terminal (D36)
     emitPre(result.action === 'ALLOW' ? 'allow' : 'deny', result.reason);
@@ -156,62 +133,58 @@ async function handlePre(event: HookEvent): Promise<never> {
   }
 }
 
-async function handlePost(event: HookEvent): Promise<never> {
-  // Be tolerant of the result field name across Claude Code versions (robustness flag): the result
-  // may arrive as tool_response or tool_output, or be absent on a failure that carries `error`.
-  const tr = event.tool_response ?? event.tool_output;
-  const err = event.error;
+async function handlePost(parsed: ParsedEvent): Promise<never> {
+  const call = parsed.call ?? { tool: 'unknown', input: {} };
   const body: InspectRequest = {
-    tool: event.tool_name ?? 'unknown',
-    input: event.tool_input ?? {},
-    sessionId: event.session_id,
-    toolResponse: typeof tr === 'string' ? tr : JSON.stringify(tr ?? ''),
-    ...(err !== undefined && err !== null ? { error: typeof err === 'string' ? err : JSON.stringify(err) } : {}),
+    tool: call.tool,
+    input: call.input,
+    sessionId: call.sessionId,
+    toolResponse: parsed.toolResponse ?? '',
+    ...(parsed.error != null ? { error: parsed.error } : {}),
   };
   try {
     const resp = await post<{ tainted?: boolean; secretTypes?: string[]; injectionFlagged?: boolean }>('/inspect', body);
-    // Observe-only notices (D36): a secret entering context or an injection in the result arms the
-    // exfil gate for the NEXT egress — surface it now so the human has context before that happens.
     if (resp.tainted) notify(`⚠ AgentGuard: secret loaded into context via ${body.tool}${resp.secretTypes?.length ? ` (${resp.secretTypes.join(', ')})` : ''}${sessionLink(body.sessionId)}`);
     if (resp.injectionFlagged) notify(`⚠ AgentGuard: prompt-injection detected in ${body.tool} result — outbound calls now gated.${sessionLink(body.sessionId)}`);
   } catch {
     /* best-effort: PostToolUse cannot block, so a missing engine just means no taint update. */
   }
-  emitPost();
+  emit(adapter.formatPost());
 }
 
-/** SessionStart / SessionEnd — observability-only; bookends the timeline and resets monitors on end. */
-async function handleSession(event: HookEvent, kind: 'started' | 'ended'): Promise<never> {
-  const body: SessionEvent = { event: kind, sessionId: event.session_id ?? 'default', source: event.source };
+async function handleSession(kind: 'started' | 'ended', parsed: ParsedEvent): Promise<never> {
+  const body: SessionEvent = { event: kind, sessionId: parsed.call?.sessionId ?? 'default', source: parsed.sessionSource };
   try {
     await post('/session', body);
   } catch {
     /* best-effort: session bookkeeping never blocks the agent. */
   }
-  process.stdout.write('{}');
-  process.exit(0);
+  emit(adapter.formatSession());
 }
 
 async function main(): Promise<void> {
   const raw = await readStdin();
-  let event: HookEvent = {};
+  let event: Record<string, unknown> = {};
   try {
-    event = JSON.parse(raw || '{}');
+    event = JSON.parse(raw || '{}') as Record<string, unknown>;
   } catch {
     /* malformed event */
   }
 
-  const name = event.hook_event_name;
-  if (name === 'SessionStart') return void (await handleSession(event, 'started'));
-  if (name === 'SessionEnd') return void (await handleSession(event, 'ended'));
-
-  const isPost =
-    name === 'PostToolUse' ||
-    event.tool_response !== undefined ||
-    event.tool_output !== undefined ||
-    event.error !== undefined;
-  if (isPost) return void (await handlePost(event));
-  return void (await handlePre(event));
+  const parsed = adapter.parse(event);
+  switch (parsed.kind) {
+    case 'session-start':
+      return void (await handleSession('started', parsed));
+    case 'session-end':
+      return void (await handleSession('ended', parsed));
+    case 'post':
+      return void (await handlePost(parsed));
+    case 'ignore':
+      return emit(adapter.formatPost()); // not a gated event for this agent — acknowledge and proceed
+    case 'pre':
+    default:
+      return void (await handlePre(parsed.call ?? { tool: 'unknown', input: {} }));
+  }
 }
 
 void main();

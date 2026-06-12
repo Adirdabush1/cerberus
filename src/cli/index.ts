@@ -124,7 +124,7 @@ async function main(): Promise<void> {
   if (cmd === 'pending') return runPending();
   process.stderr.write(
     'usage: agentguard <command>\n\n' +
-      '  init [--global] [--print]   wire the Pre/PostToolUse hooks into .claude/settings.json\n' +
+      '  init [--agent claude|codex|cursor|cline] [--global] [--print]   wire the hooks into the agent\n' +
       '  engine                      start the gateway (HTTP hold + WS) and serve the dashboard\n' +
       '  hook                        the Claude Code hook entry (spawned per tool call)\n' +
       '  pending                     list calls held for review (with their ids)\n' +

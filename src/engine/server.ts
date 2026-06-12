@@ -218,10 +218,11 @@ export class Engine {
       return json(res, 200, { action, reason, band: risk.band, sessionId: call.sessionId });
     }
 
-    // HITL — terminal surface (default): don't hold. Return ASK so the hook can defer to Claude Code's
-    // NATIVE in-terminal permission prompt (M4-C). The held call is still recorded for the timeline; the
-    // approve/deny happens in the terminal, so the engine doesn't own the outcome here.
-    if ((this.opts.approvalSurface ?? 'terminal') === 'terminal') {
+    // HITL — terminal/ASK surface: don't hold. Return ASK so the adapter can defer to the agent's NATIVE
+    // in-tool permission prompt (M4-C/M5). The mode is chosen by the agent's adapter (approvalMode) since
+    // not every agent supports a native prompt; absent ⇒ fall back to the engine's configured surface.
+    const askMode = call.approvalMode ? call.approvalMode === 'ask' : (this.opts.approvalSurface ?? 'terminal') === 'terminal';
+    if (askMode) {
       this.writeAudit({ ...base, event: 'hitl-opened', reason });
       return json(res, 200, { action: 'ASK', reason, band: risk.band, sessionId: call.sessionId });
     }

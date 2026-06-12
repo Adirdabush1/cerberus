@@ -1,87 +1,137 @@
 /**
- * `agentguard init` — wire the Pre/PostToolUse hooks into Claude Code's settings (D21).
+ * `agentguard init [--agent claude|codex|cursor|cline] [--global] [--print]` — wire AgentGuard's hook
+ * into the target agent (M5). Safe by default: MERGE (never overwrite), IDEMPOTENT, BACK UP first.
  *
- * Auto-merge, safe by default: MERGES into the existing settings.json (never overwrites), is
- * IDEMPOTENT (won't double-add), and BACKS UP the file before changing it. `--global` targets
- * ~/.claude/settings.json; `--print` emits the snippet without touching any file.
+ * Each agent has a different hook config shape/location, so there's one installer per agent. The hook
+ * command is always `node "<bin>" hook --agent <name>`; the per-agent adapter does the rest.
+ *
+ * VERIFICATION: `claude` is verified end-to-end. `codex`/`cursor`/`cline` configs follow the published
+ * specs (late-2025/2026) and are flagged for live re-verification — use `--print` to preview/paste.
  */
-import { existsSync, mkdirSync, readFileSync, writeFileSync, copyFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, writeFileSync, copyFileSync, chmodSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
 
 const PACKAGE_ROOT = process.env.AG_HOME ?? process.cwd();
 const BIN = join(PACKAGE_ROOT, 'bin', 'agentguard.mjs');
-// Pre ≥ engine TTL (it holds the socket); the others are quick fire-and-acknowledge posts.
-const HOOK_TIMEOUTS = { PreToolUse: 310, PostToolUse: 10, SessionStart: 10, SessionEnd: 10 } as const;
-// Tool-scoped events match by tool (`*`); session lifecycle events are not tool-scoped (no matcher).
-const TOOL_EVENTS = new Set<keyof typeof HOOK_TIMEOUTS>(['PreToolUse', 'PostToolUse']);
-const HOOK_EVENTS = Object.keys(HOOK_TIMEOUTS) as (keyof typeof HOOK_TIMEOUTS)[];
+type Agent = 'claude' | 'codex' | 'cursor' | 'cline';
+const AGENTS: readonly Agent[] = ['claude', 'codex', 'cursor', 'cline'];
+
+// Quote the path so a Windows install dir with spaces still runs; tag the agent so the adapter is picked.
+const cmd = (agent: Agent): string => `node "${BIN}" hook --agent ${agent}`;
+const PRE_TIMEOUT = 310; // ≥ engine TTL for hold-mode agents (codex/cline); harmless for ask-mode.
 
 interface HookCmd { type: 'command'; command: string; timeout?: number }
 interface HookGroup { matcher?: string; hooks?: HookCmd[] }
-interface Settings { hooks?: Record<string, HookGroup[]>; [k: string]: unknown }
+type Json = Record<string, unknown>;
 
-function hookGroup(event: keyof typeof HOOK_TIMEOUTS): HookGroup {
-  // Quote the path so a Windows install dir with spaces (C:\Users\First Last\…) still runs.
-  const hooks: HookCmd[] = [{ type: 'command', command: `node "${BIN}" hook`, timeout: HOOK_TIMEOUTS[event] }];
-  return TOOL_EVENTS.has(event) ? { matcher: '*', hooks } : { hooks };
+const wired = (command: string): boolean => command.includes(BIN) && /\bhook\b/.test(command);
+
+function backupAndWrite(path: string, data: string): string {
+  if (existsSync(path)) copyFileSync(path, `${path}.bak`);
+  mkdirSync(dirname(path), { recursive: true });
+  writeFileSync(path, data);
+  return existsSync(`${path}.bak`) ? `   Backup: ${path}.bak\n` : '';
 }
 
-/** True if this event already has an AgentGuard hook (idempotency). */
-function alreadyWired(groups: HookGroup[]): boolean {
-  return groups.some((g) => g.hooks?.some((h) => typeof h.command === 'string' && h.command.includes(BIN) && /\bhook\b/.test(h.command)));
+const readJson = (path: string): Json => (existsSync(path) ? (JSON.parse(readFileSync(path, 'utf8')) as Json) : {});
+
+/* ── Claude Code & Codex share the same hooks.json shape (Codex copied the spec) ── */
+function claudeShapeConfig(agent: Agent): Json {
+  const tool = (event: string): HookGroup => ({ matcher: '*', hooks: [{ type: 'command', command: cmd(agent), timeout: event === 'PreToolUse' ? PRE_TIMEOUT : 10 }] });
+  const lifecycle = (): HookGroup => ({ hooks: [{ type: 'command', command: cmd(agent), timeout: 10 }] });
+  return { hooks: { PreToolUse: [tool('PreToolUse')], PostToolUse: [tool('PostToolUse')], SessionStart: [lifecycle()], SessionEnd: [lifecycle()] } };
+}
+
+function mergeClaudeShape(path: string, agent: Agent): { added: number; unchanged: number } {
+  const settings = readJson(path);
+  const hooks = ((settings as { hooks?: Record<string, HookGroup[]> }).hooks ??= {});
+  let added = 0, unchanged = 0;
+  for (const [event, groups] of Object.entries((claudeShapeConfig(agent).hooks as Record<string, HookGroup[]>))) {
+    const existing = (hooks[event] ??= []);
+    if (!Array.isArray(existing)) continue;
+    if (existing.some((g) => g.hooks?.some((h) => typeof h.command === 'string' && wired(h.command)))) unchanged++;
+    else (existing.push(groups[0] as HookGroup), added++);
+  }
+  if (added > 0) backupAndWrite(path, JSON.stringify(settings, null, 2) + '\n');
+  return { added, unchanged };
+}
+
+/* ── Cursor: { version, hooks: { beforeShellExecution: [{command, failClosed}], … } } ── */
+function cursorConfig(): Json {
+  const h = (): Json => ({ command: cmd('cursor'), failClosed: true }); // Cursor defaults fail-OPEN
+  return { version: 1, hooks: { beforeShellExecution: [h()], beforeMCPExecution: [h()] } };
+}
+
+function mergeCursor(path: string): { added: number; unchanged: number } {
+  const cfg = readJson(path);
+  cfg['version'] ??= 1;
+  const hooks = ((cfg as { hooks?: Record<string, Json[]> }).hooks ??= {});
+  let added = 0, unchanged = 0;
+  for (const [event, arr] of Object.entries(cursorConfig().hooks as Record<string, Json[]>)) {
+    const existing = (hooks[event] ??= []);
+    if (!Array.isArray(existing)) continue;
+    if (existing.some((h) => typeof h['command'] === 'string' && wired(h['command'] as string))) unchanged++;
+    else (existing.push(arr[0] as Json), added++);
+  }
+  if (added > 0) backupAndWrite(path, JSON.stringify(cfg, null, 2) + '\n');
+  return { added, unchanged };
+}
+
+/* ── Cline: executable script files named exactly after the hook event (no JSON config) ── */
+const CLINE_SCRIPT = (): string => `#!/bin/sh\n# AgentGuard hook for Cline — auto-generated by \`agentguard init --agent cline\`.\nexec node "${BIN}" hook --agent cline\n`;
+function installCline(dir: string): { added: number; unchanged: number } {
+  let added = 0, unchanged = 0;
+  for (const event of ['PreToolUse', 'PostToolUse']) {
+    const file = join(dir, event);
+    if (existsSync(file) && readFileSync(file, 'utf8').includes(BIN)) { unchanged++; continue; }
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(file, CLINE_SCRIPT());
+    chmodSync(file, 0o755);
+    added++;
+  }
+  return { added, unchanged };
+}
+
+/* ── paths per agent ── */
+function configPath(agent: Agent, global: boolean): string {
+  const home = homedir(), cwd = process.cwd();
+  switch (agent) {
+    case 'claude': return join(global ? home : cwd, '.claude', 'settings.json');
+    case 'codex': return global ? join(home, '.codex', 'hooks.json') : join(cwd, '.codex', 'hooks.json');
+    case 'cursor': return global ? join(home, '.cursor', 'hooks.json') : join(cwd, '.cursor', 'hooks.json');
+    case 'cline': return global ? join(home, 'Documents', 'Cline', 'Rules', 'Hooks') : join(cwd, '.clinerules', 'hooks');
+  }
 }
 
 export function runInit(argv: string[]): void {
   const global = argv.includes('--global');
   const printOnly = argv.includes('--print');
-  const settingsPath = global
-    ? join(homedir(), '.claude', 'settings.json')
-    : join(process.cwd(), '.claude', 'settings.json');
+  const ai = argv.indexOf('--agent');
+  const agent: Agent = ai >= 0 && AGENTS.includes(argv[ai + 1] as Agent) ? (argv[ai + 1] as Agent) : 'claude';
+  const path = configPath(agent, global);
 
   if (printOnly) {
-    const snippet = { hooks: Object.fromEntries(HOOK_EVENTS.map((e) => [e, [hookGroup(e)]])) };
-    process.stdout.write(
-      `Add this to ${settingsPath} (merge into any existing "hooks"):\n\n${JSON.stringify(snippet, null, 2)}\n\n` +
-        `Then run \`agentguard engine\` and open the dashboard.\n`,
-    );
+    if (agent === 'cline') {
+      process.stdout.write(`Create executable files in ${path}/ named PreToolUse and PostToolUse, each:\n\n${CLINE_SCRIPT()}\nthen \`chmod +x\` them.\n`);
+    } else {
+      const snippet = agent === 'cursor' ? cursorConfig() : claudeShapeConfig(agent);
+      process.stdout.write(`Merge into ${path}:\n\n${JSON.stringify(snippet, null, 2)}\n`);
+    }
     return;
   }
 
-  const settings: Settings = existsSync(settingsPath)
-    ? (JSON.parse(readFileSync(settingsPath, 'utf8')) as Settings)
-    : {};
-  settings.hooks ??= {};
+  const r =
+    agent === 'cursor' ? mergeCursor(path) : agent === 'cline' ? installCline(path) : mergeClaudeShape(path, agent);
 
-  let added = 0;
-  let unchanged = 0;
-  for (const event of HOOK_EVENTS) {
-    const groups = (settings.hooks[event] ??= []);
-    if (!Array.isArray(groups)) {
-      process.stderr.write(`AgentGuard: unexpected ${event} shape in ${settingsPath}; leaving it untouched.\n`);
-      continue;
-    }
-    if (alreadyWired(groups)) {
-      unchanged++;
-      continue;
-    }
-    groups.push(hookGroup(event));
-    added++;
-  }
-
-  if (added === 0) {
-    process.stdout.write(`AgentGuard hooks already present in ${settingsPath} — nothing to do.\n`);
+  if (r.added === 0) {
+    process.stdout.write(`AgentGuard (${agent}) already wired at ${path} — nothing to do.\n`);
     return;
   }
-
-  // back up before writing
-  if (existsSync(settingsPath)) copyFileSync(settingsPath, `${settingsPath}.bak`);
-  mkdirSync(dirname(settingsPath), { recursive: true });
-  writeFileSync(settingsPath, JSON.stringify(settings, null, 2) + '\n');
-
   process.stdout.write(
-    `✅ Wired AgentGuard into ${settingsPath} (${added} hook${added > 1 ? 's' : ''} added, ${unchanged} already present).\n` +
-      (existsSync(`${settingsPath}.bak`) ? `   Backup: ${settingsPath}.bak\n` : '') +
-      `\nNext:\n  1. agentguard engine        # start the gateway + dashboard\n  2. open http://127.0.0.1:9000/   # the dashboard\n  3. use Claude Code as usual — tool calls now route through AgentGuard.\n`,
+    `✅ Wired AgentGuard into ${agent} at ${path} (${r.added} added, ${r.unchanged} already present).\n` +
+      (existsSync(`${path}.bak`) ? `   Backup: ${path}.bak\n` : '') +
+      `\nNext:\n  1. agentguard engine          # start the gateway + dashboard\n  2. open http://127.0.0.1:9000/\n  3. use ${agent} as usual — tool calls now route through AgentGuard.\n` +
+      (agent === 'codex' || agent === 'cline' ? `  (HITL approvals: this agent has no native prompt → run with AG_APPROVAL_SURFACE=dashboard and approve in the UI / \`agentguard pending\`.)\n` : ''),
   );
 }

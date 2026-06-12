@@ -40,8 +40,8 @@ try {
     check('creates .claude/settings.json', existsSync(sp));
     const s = read(sp);
     const cmd = s.hooks?.PreToolUse?.[0]?.hooks?.[0]?.command ?? '';
-    // path is quoted (Windows spaces) and may use either separator
-    check('PreToolUse hook wired (node "…/agentguard.mjs" hook)', /agentguard\.mjs"? hook$/.test(cmd), cmd);
+    // path is quoted (Windows spaces) and may use either separator; command tags the agent (M5)
+    check('PreToolUse hook wired (node "…/agentguard.mjs" hook --agent claude)', /agentguard\.mjs"? hook --agent claude$/.test(cmd), cmd);
     check('PostToolUse hook wired', !!s.hooks?.PostToolUse?.[0]?.hooks?.[0]?.command);
     check('PreToolUse timeout >= 300 (>= engine TTL)', s.hooks.PreToolUse[0].hooks[0].timeout >= 300);
     check('SessionStart hook wired', !!s.hooks?.SessionStart?.[0]?.hooks?.[0]?.command);
@@ -83,6 +83,28 @@ try {
     const { out } = quiet(() => runInit(['--print']));
     check('--print emits a hooks snippet', /PreToolUse/.test(out) && /PostToolUse/.test(out) && /SessionStart/.test(out) && /SessionEnd/.test(out));
     check('--print writes no file', !existsSync(join(dir, '.claude', 'settings.json')));
+  }
+
+  // ── M5: per-agent wiring (codex / cursor / cline) ──
+  {
+    const dir = mkdtempSync(join(tmpdir(), 'ag-init-'));
+    process.chdir(dir);
+
+    quiet(() => runInit(['--agent', 'codex']));
+    const codex = read(join(dir, '.codex', 'hooks.json'));
+    check('codex: writes .codex/hooks.json with PreToolUse', /agentguard\.mjs"? hook --agent codex$/.test(codex.hooks?.PreToolUse?.[0]?.hooks?.[0]?.command ?? ''));
+
+    quiet(() => runInit(['--agent', 'cursor']));
+    const cursor = read(join(dir, '.cursor', 'hooks.json'));
+    const shell = cursor.hooks?.beforeShellExecution?.[0];
+    check('cursor: beforeShellExecution wired + failClosed', /--agent cursor$/.test(shell?.command ?? '') && shell?.failClosed === true);
+
+    quiet(() => runInit(['--agent', 'cline']));
+    const clinePre = join(dir, '.clinerules', 'hooks', 'PreToolUse');
+    check('cline: writes executable PreToolUse script', existsSync(clinePre) && readFileSync(clinePre, 'utf8').includes('--agent cline'));
+
+    const { out } = quiet(() => runInit(['--agent', 'codex']));
+    check('codex: second run is idempotent', /nothing to do/.test(out), out.trim());
   }
 } finally {
   process.chdir(origCwd);

@@ -54,6 +54,12 @@ export interface MCPToolCall {
   input: Record<string, unknown>;
   sessionId?: string;
   cwd?: string;
+  /**
+   * How the agent's adapter wants a HITL handled (M5): 'ask' ⇒ the agent supports a native in-tool
+   * prompt, so the engine returns ASK immediately; 'hold' ⇒ no native prompt, so the engine holds the
+   * socket for a dashboard/CLI decision. Absent ⇒ the engine falls back to its `approvalSurface` option.
+   */
+  approvalMode?: 'ask' | 'hold';
 }
 
 /** Output of the policy engine for one call (pre-HITL resolution). */
