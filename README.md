@@ -1,4 +1,8 @@
-# Cerberus
+# Cerberus 🐺
+
+[![npm version](https://img.shields.io/npm/v/@cerberussec/core.svg)](https://www.npmjs.com/package/@cerberussec/core)
+[![license](https://img.shields.io/npm/l/@cerberussec/core.svg)](./LICENSE)
+[![node](https://img.shields.io/node/v/@cerberussec/core.svg)](https://nodejs.org)
 
 A **local-first security gateway for autonomous AI coding agents.** Cerberus sits between the agent
 (Claude Code, Codex, Cursor, Cline) and your machine, intercepts **every tool call** before it runs,
