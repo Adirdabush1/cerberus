@@ -7,7 +7,7 @@
   "publishConfig": {
     "access": "public"
   },
-  "author": "Adir Dabush <Adir.dabush@msapps.mobi>",
+  "author": "Adir Dabush",
   "homepage": "https://github.com/Adirdabush1/cerberus#readme",
   "repository": {
     "type": "git",
