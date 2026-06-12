@@ -56,7 +56,8 @@
     "test:projector": "tsx scripts/projector.test.ts",
     "test:audit": "tsx scripts/audit.test.ts",
     "test:notify": "tsx scripts/notify.test.ts",
-    "test:security": "tsx scripts/security.test.ts"
+    "test:security": "tsx scripts/security.test.ts",
+    "test:policy": "tsx scripts/policy.test.ts"
   },
   "dependencies": {
     "js-yaml": "^4.1.0",

@@ -27,6 +27,9 @@ const KNOWN_TOOLS: Readonly<Record<string, ToolCategory>> = {
   execute_bash: 'EXECUTE',
   shell: 'EXECUTE',
   run_command: 'EXECUTE',
+  PowerShell: 'EXECUTE', // Windows: Claude Code routes shell commands through a PowerShell tool
+  pwsh: 'EXECUTE',
+  cmd: 'EXECUTE',
   // network egress
   WebFetch: 'EGRESS',
   WebSearch: 'EGRESS',

@@ -31,6 +31,18 @@ rules:
     when:
       matches: ["(curl|wget)\\b[^|]*\\|\\s*(sudo\\s+)?(ba|z)?sh\\b", { var: command }]
 
+  - id: block-ps-destructive-delete
+    description: "Recursive/forced delete on Windows (Remove-Item -Recurse/-Force, rd /s, del /q) is blocked."
+    action: BLOCK
+    when:
+      matches: ["\\b(Remove-Item|ri|rmdir|rd)\\b[^|;]*-(Recurse|Force)\\b|\\b(rd|rmdir)\\b[^|;]*\\s/s\\b|\\b(del|erase)\\b[^|;]*\\s/[sq]\\b", { var: command }]
+
+  - id: block-ps-iex-download
+    description: "Executing a remote download via Invoke-Expression (iex) is blocked."
+    action: BLOCK
+    when:
+      matches: ["(Invoke-WebRequest|iwr|Invoke-RestMethod|irm|DownloadString)\\b[^|;]*\\|\\s*(Invoke-Expression|iex)\\b|\\b(Invoke-Expression|iex)\\b[^|;]*\\(\\s*(Invoke-WebRequest|iwr|Invoke-RestMethod|irm|New-Object\\s+Net\\.WebClient)", { var: command }]
+
   - id: block-env-read-path
     description: "Reading a .env file is blocked (secret exfiltration risk)."
     action: BLOCK
@@ -41,7 +53,7 @@ rules:
     description: "Reading a .env file via the shell is blocked."
     action: BLOCK
     when:
-      matches: ["\\b(cat|less|more|head|tail|xxd|od)\\b[^&|;]*\\.env\\b", { var: command }]
+      matches: ["\\b(cat|less|more|head|tail|xxd|od|Get-Content|gc|type)\\b[^&|;]*\\.env\\b", { var: command }]
 
   # ───────────────────────── HITL: state changers ─────────────────────────
   - id: hitl-git-push
@@ -75,12 +87,28 @@ rules:
       "==": [{ var: category }, "EGRESS"]
 
   # ───────────────────────── ALLOW: read-only / safe ─────────────────────────
+  - id: allow-benign-builtins
+    description: "Claude Code internal tools with no host side effect are auto-approved."
+    action: ALLOW
+    when:
+      in:
+        - { var: tool }
+        - ["TodoWrite", "AskUserQuestion", "ExitPlanMode", "Task", "BashOutput", "SlashCommand"]
+
   - id: allow-readonly-commands
     description: "Common read-only shell commands are auto-approved in milliseconds."
     action: ALLOW
     when:
       matches:
         - "^\\s*(ls|pwd|echo|cat|grep|rg|find|head|tail|wc|which|whoami|date|env|printenv|tree|stat|file|git\\s+(status|log|diff|branch|show|remote|rev-parse)|node\\s+-v|npm\\s+(test|ls|run\\s+test)|cargo\\s+check)\\b"
+        - { var: command }
+
+  - id: allow-readonly-powershell
+    description: "Common read-only PowerShell cmdlets (the Windows `ls`/`cat` equivalents) are auto-approved."
+    action: ALLOW
+    when:
+      matches:
+        - "^\\s*(Get-(ChildItem|Content|Location|Item|ItemProperty|Command|Help|Member|Process|Service|Date|Variable|Acl|History)|Select-(Object|String)|Where-Object|Sort-Object|Measure-Object|Group-Object|Compare-Object|Format-(Table|List|Wide)|Out-(String|Host|GridView)|Write-(Output|Host)|Test-Path|Resolve-Path|Split-Path|Join-Path|ConvertTo-(Json|Csv)|gci|gc|gi|gl|gm|gcm|gps|sls|dir|type|cls)\\b"
         - { var: command }
 
   - id: allow-read-category
