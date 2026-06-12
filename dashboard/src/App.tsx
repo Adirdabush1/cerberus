@@ -128,7 +128,7 @@ export default function App() {
     <div className="min-h-screen bg-slate-950 text-slate-100">
       <header className="flex items-center gap-3 px-6 py-4 border-b border-white/10 bg-slate-900/50 backdrop-blur sticky top-0 z-10">
         <div className="text-lg font-bold tracking-tight">
-          🛡️ Agent<span className="text-emerald-400">Guard</span>
+          🐺 Cerb<span className="text-emerald-400">erus</span>
         </div>
         <nav className="flex items-center gap-1 ml-2">
           <Tab active={view === 'live'} onClick={() => setView('live')}>Live</Tab>

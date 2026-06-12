@@ -45,7 +45,7 @@ export class InMemoryPendingStore extends EventEmitter implements IPendingStore 
         this.emit('resolved', violation.id, 'BLOCK' satisfies FinalAction);
         resolve({
           action: 'BLOCK',
-          reason: `AgentGuard: approval timed out after ${ttlMs}ms — fail-closed deny.`,
+          reason: `Cerberus: approval timed out after ${ttlMs}ms — fail-closed deny.`,
           violationId: violation.id,
         });
       }, ttlMs);
@@ -64,7 +64,7 @@ export class InMemoryPendingStore extends EventEmitter implements IPendingStore 
     this.emit('resolved', violationId, action);
     entry.resolve({
       action,
-      reason: action === 'ALLOW' ? 'AgentGuard: approved by human.' : 'AgentGuard: denied by human.',
+      reason: action === 'ALLOW' ? 'Cerberus: approved by human.' : 'Cerberus: denied by human.',
       violationId,
     });
   }
@@ -79,7 +79,7 @@ export class InMemoryPendingStore extends EventEmitter implements IPendingStore 
     // nobody reads this, but resolving prevents a dangling promise.
     entry.resolve({
       action: 'BLOCK',
-      reason: 'AgentGuard: client disconnected before approval — context cleaned up (fail-closed).',
+      reason: 'Cerberus: client disconnected before approval — context cleaned up (fail-closed).',
       violationId,
     });
   }

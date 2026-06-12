@@ -1,9 +1,12 @@
 {
-  "name": "agentguard",
+  "name": "@cerberussec/core",
   "version": "0.1.0",
-  "description": "A local-first security gateway (WAF) for autonomous AI agents — intercept, risk-score, and human-approve tool calls. Terminal-first, with a forensic dashboard.",
+  "description": "Cerberus — a local-first security gateway for autonomous AI coding agents. Intercept, risk-score, and human-approve every tool call. Terminal-first, with a forensic dashboard.",
   "type": "module",
   "license": "Apache-2.0",
+  "publishConfig": {
+    "access": "public"
+  },
   "author": "Adir Dabush <Adir.dabush@msapps.mobi>",
   "homepage": "https://github.com/Adirdabush1/agentguard#readme",
   "repository": {
@@ -26,7 +29,7 @@
     "mcp"
   ],
   "bin": {
-    "agentguard": "bin/agentguard.mjs"
+    "cerberus": "bin/agentguard.mjs"
   },
   "files": [
     "dist",

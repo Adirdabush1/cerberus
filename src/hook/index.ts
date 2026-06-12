@@ -21,7 +21,7 @@ const FAIL_OPEN = process.env.AG_FAIL_OPEN === '1';
 const TERMINAL_NOTIFY = process.env.AG_NOTIFY !== '0';
 const HELD_NOTICE_MS = Number(process.env.AG_HELD_NOTICE_MS ?? 400); // a slower /intercept ⇒ it's held (D41)
 
-// Which agent are we adapting? `--agent <name>` (written by `agentguard init`) or AG_AGENT; default claude.
+// Which agent are we adapting? `--agent <name>` (written by `cerberus init`) or AG_AGENT; default claude.
 function selectedAgent(): string | undefined {
   const i = process.argv.indexOf('--agent');
   if (i >= 0 && process.argv[i + 1]) return process.argv[i + 1];
@@ -106,11 +106,11 @@ async function handlePre(call: MCPToolCall): Promise<never> {
   call.approvalMode = APPROVAL_MODE;
 
   // If /intercept is slow to answer, the call is being HELD — tell the human so the agent isn't just
-  // silently hung (D41). The specific id isn't known yet, so point at `agentguard pending`.
+  // silently hung (D41). The specific id isn't known yet, so point at `cerberus pending`.
   let held = false;
   const heldTimer = setTimeout(() => {
     held = true;
-    notify(`⏸ AgentGuard HELD ${call.tool} — awaiting approval.\n   review: agentguard pending${sessionLink(call.sessionId)}`);
+    notify(`⏸ Cerberus HELD ${call.tool} — awaiting approval.\n   review: cerberus pending${sessionLink(call.sessionId)}`);
   }, HELD_NOTICE_MS);
 
   try {
@@ -120,16 +120,16 @@ async function handlePre(call: MCPToolCall): Promise<never> {
     // "ask" for Claude, permission "ask" for Cursor).
     if (result.action === 'ASK') emitPre('ask', result.reason);
     if (held) {
-      notify(result.action === 'ALLOW' ? `✓ AgentGuard: approved ${call.tool}` : `⛔ AgentGuard: denied ${call.tool}`);
+      notify(result.action === 'ALLOW' ? `✓ Cerberus: approved ${call.tool}` : `⛔ Cerberus: denied ${call.tool}`);
     } else if (result.action === 'BLOCK') {
-      notify(`⛔ AgentGuard BLOCKED ${call.tool} · ${result.reason}${sessionLink(result.sessionId ?? call.sessionId)}`);
+      notify(`⛔ Cerberus BLOCKED ${call.tool} · ${result.reason}${sessionLink(result.sessionId ?? call.sessionId)}`);
     } // auto ALLOW / AUDIT → silent in the terminal (D36)
     emitPre(result.action === 'ALLOW' ? 'allow' : 'deny', result.reason);
   } catch (err) {
     clearTimeout(heldTimer);
-    const why = `AgentGuard engine unreachable at ${ENGINE_HOST}:${ENGINE_PORT} (${(err as Error).message}).`;
+    const why = `Cerberus engine unreachable at ${ENGINE_HOST}:${ENGINE_PORT} (${(err as Error).message}).`;
     if (FAIL_OPEN) emitPre('allow', `${why} AG_FAIL_OPEN=1 → allowing.`);
-    emitPre('deny', `${why} Start it with \`agentguard engine\`, or set AG_FAIL_OPEN=1. Failing closed.`);
+    emitPre('deny', `${why} Start it with \`cerberus engine\`, or set AG_FAIL_OPEN=1. Failing closed.`);
   }
 }
 
@@ -144,8 +144,8 @@ async function handlePost(parsed: ParsedEvent): Promise<never> {
   };
   try {
     const resp = await post<{ tainted?: boolean; secretTypes?: string[]; injectionFlagged?: boolean }>('/inspect', body);
-    if (resp.tainted) notify(`⚠ AgentGuard: secret loaded into context via ${body.tool}${resp.secretTypes?.length ? ` (${resp.secretTypes.join(', ')})` : ''}${sessionLink(body.sessionId)}`);
-    if (resp.injectionFlagged) notify(`⚠ AgentGuard: prompt-injection detected in ${body.tool} result — outbound calls now gated.${sessionLink(body.sessionId)}`);
+    if (resp.tainted) notify(`⚠ Cerberus: secret loaded into context via ${body.tool}${resp.secretTypes?.length ? ` (${resp.secretTypes.join(', ')})` : ''}${sessionLink(body.sessionId)}`);
+    if (resp.injectionFlagged) notify(`⚠ Cerberus: prompt-injection detected in ${body.tool} result — outbound calls now gated.${sessionLink(body.sessionId)}`);
   } catch {
     /* best-effort: PostToolUse cannot block, so a missing engine just means no taint update. */
   }

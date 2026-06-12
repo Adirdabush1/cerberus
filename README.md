@@ -1,6 +1,6 @@
-# AgentGuard
+# Cerberus
 
-A **local-first security gateway for autonomous AI coding agents.** AgentGuard sits between the agent
+A **local-first security gateway for autonomous AI coding agents.** Cerberus sits between the agent
 (Claude Code, Codex, Cursor, Cline) and your machine, intercepts **every tool call** before it runs,
 risk-scores it across four signals, and either **allows, audits, asks for human approval, or blocks**
 it — all on your machine, with **no external API and nothing leaving the box.**
@@ -9,7 +9,7 @@ it — all on your machine, with **no external API and nothing leaving the box.*
 Autonomous coding agents run shell commands, edit files, and make network calls on your behalf — at
 machine speed, often unattended. One bad step (`rm -rf`, an unwanted `git push`, a leaked `.env`, a
 poisoned README that tricks the agent into exfiltrating secrets) and there's no human in the loop to
-stop it. AgentGuard puts that checkpoint **on the tool boundary**, where the agent actually acts.
+stop it. Cerberus puts that checkpoint **on the tool boundary**, where the agent actually acts.
 
 ## What it does
 ```
@@ -35,7 +35,7 @@ prohibitions can never override.
 
 ## Key features
 - **Terminal-first approval** — held calls surface in the agent's native permission prompt (Claude Code /
-  Cursor), or via `agentguard approve <id>` / a localhost dashboard.
+  Cursor), or via `cerberus approve <id>` / a localhost dashboard.
 - **Forensic dashboard** — per-session timeline, risk-factor breakdown, and a **Replay** player that steps
   through how a session's risk built up.
 - **Multi-agent** — one adapter layer serves Claude Code, Codex, Cursor, and Cline.
@@ -45,31 +45,31 @@ prohibitions can never override.
 ## Quickstart
 
 ```bash
-npm i -g agentguard      # or run ad-hoc with: npx agentguard <cmd>
+npm i -g @cerberussec/core      # or run ad-hoc with: npx @cerberussec/core <cmd>
 
-# wire AgentGuard into your agent (merges into the agent's config — backed up, idempotent):
-agentguard init                 # Claude Code, project-level   (--agent codex|cursor|cline, --global, --print)
+# wire Cerberus into your agent (merges into the agent's config — backed up, idempotent):
+cerberus init                 # Claude Code, project-level   (--agent codex|cursor|cline, --global, --print)
 
 # start the gateway + dashboard (one process):
-agentguard engine               # then open http://127.0.0.1:9000/
+cerberus engine               # then open http://127.0.0.1:9000/
 ```
 
-Use your agent as usual — tool calls now route through AgentGuard. By default a held (HITL) call is
-**approved right in the terminal**: AgentGuard returns `ask`, so Claude Code shows its native
-permission prompt with AgentGuard's reason — approve/deny without leaving your session.
+Use your agent as usual — tool calls now route through Cerberus. By default a held (HITL) call is
+**approved right in the terminal**: Cerberus returns `ask`, so Claude Code shows its native
+permission prompt with Cerberus's reason — approve/deny without leaving your session.
 
 The dashboard (`http://127.0.0.1:9000/`) has a **Live** tab (Action Center + stream) and a
 **Sessions** tab — a forensic timeline per session with a risk-factor breakdown and a **Replay**
 player to step through how a session's risk built up.
 
 ## Terminal-first approvals
-AgentGuard runs *inside* the agent's execution loop, so the terminal is the realtime decision point
+Cerberus runs *inside* the agent's execution loop, so the terminal is the realtime decision point
 and the dashboard is the deep dive. Per severity (default `AG_APPROVAL_SURFACE=terminal`):
 
 | verdict | terminal | web UI |
 |---|---|---|
 | **BLOCK** | ⛔ denied in-terminal (Claude shows the reason) + optional auto-open | forensics |
-| **HITL** | ✋ **Claude's native permission prompt**, with AgentGuard's reason | forensics |
+| **HITL** | ✋ **Claude's native permission prompt**, with Cerberus's reason | forensics |
 | **AUDIT** | — (quiet) | elevated-risk record |
 | **ALLOW** | — (silent) | — |
 
@@ -77,9 +77,9 @@ Prefer a central web queue instead? Set **`AG_APPROVAL_SURFACE=dashboard`** — 
 the engine's synchronous hold and you Approve/Deny from the dashboard (or the terminal, out-of-band):
 
 ```bash
-agentguard pending              # list calls held for review (with their ids)
-agentguard approve <id>         # release a held call …
-agentguard deny <id>            # … or deny it
+cerberus pending              # list calls held for review (with their ids)
+cerberus approve <id>         # release a held call …
+cerberus deny <id>            # … or deny it
 ```
 
 Extra terminal alerts write to the controlling terminal (`/dev/tty`, falling back to stderr) so the
@@ -93,7 +93,7 @@ protocol channel to Claude Code stays clean. Tune via env:
 
 ## Agents
 The engine + signals + risk + dashboard are agent-agnostic; only a thin **adapter** (parse the agent's
-hook event → normalize → emit its verdict shape) is per-agent. Wire one with `agentguard init --agent <name>`:
+hook event → normalize → emit its verdict shape) is per-agent. Wire one with `cerberus init --agent <name>`:
 
 | agent | `--agent` | HITL approval | notes |
 |---|---|---|---|
@@ -103,7 +103,7 @@ hook event → normalize → emit its verdict shape) is per-agent. Wire one with
 | **Cline** | `cline` | dashboard hold (`cancel` bool) | macOS/Linux only |
 
 `codex`/`cursor`/`cline` adapters follow the published hook specs; verify against your installed version
-(`agentguard init --agent <name> --print` shows the exact config). Roo Code is unsupported (archived 2026).
+(`cerberus init --agent <name> --print` shows the exact config). Roo Code is unsupported (archived 2026).
 
 ## How it plugs in
 - **PreToolUse hook → `/intercept`** is the single hard enforcement point (allow/deny/ask; or HITL holds the
@@ -122,7 +122,7 @@ Single Node + TypeScript package; the dashboard is a Vite/React app served by th
 risk weights are editable **YAML data**, not code (`rules/`).
 
 ## What it is — and isn't
-AgentGuard is a **runtime gateway on the tool boundary**. It's strongest at secret-exfiltration
+Cerberus is a **runtime gateway on the tool boundary**. It's strongest at secret-exfiltration
 prevention and as a permission chokepoint. Because it sees tool calls (not the LLM prompt), it catches
 the *exploitation* of a prompt injection — not the injection itself — and it does **not** cover
 data-pipeline / RAG poisoning. The exfil match is high-confidence but not airtight (novel secret formats,

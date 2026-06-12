@@ -1,7 +1,7 @@
 /**
- * AgentGuard CLI — two subcommands:
- *   agentguard engine   start the long-running Engine (HTTP hold + WS dashboard feed)
- *   agentguard hook      run the PreToolUse hook (Claude Code spawns this per tool call)
+ * Cerberus CLI — two subcommands:
+ *   cerberus engine   start the long-running Engine (HTTP hold + WS dashboard feed)
+ *   cerberus hook      run the PreToolUse hook (Claude Code spawns this per tool call)
  */
 import { existsSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
@@ -52,7 +52,7 @@ async function runEngine(): Promise<void> {
   const engine = new Engine({ port, rulesPath, auditFile, ttlMs, behavioral, content, injection, weightsPath, staticDir, autoOpen, approvalSurface });
   await engine.listen();
   process.stderr.write(
-    `AgentGuard engine listening on :${port}\n` +
+    `Cerberus engine listening on :${port}\n` +
       `  rules: ${rulesPath}\n  audit: ${auditFile}\n  HITL TTL: ${ttlMs}ms\n` +
       `  anomaly: ${behavioral.maxRate} calls / ${behavioral.maxRepeat} repeats per ${behavioral.windowMs}ms (×${behavioral.hardMultiplier} = block)\n` +
       `  content: secret-scan ${content.scanLimitBytes}B/result, path-risk TTL ${content.pathRiskTtlMs}ms → exfil HITL\n` +
@@ -71,30 +71,30 @@ function engineFetch(path: string, init?: RequestInit): Promise<Response> {
   return fetch(`http://${host}:${port}${path}`, { headers: { 'content-type': 'application/json' }, ...init });
 }
 
-/** `agentguard approve|deny <id>` — the terminal approval channel (M4-C, D34). */
+/** `cerberus approve|deny <id>` — the terminal approval channel (M4-C, D34). */
 async function runDecision(action: 'ALLOW' | 'BLOCK', id: string | undefined): Promise<void> {
   if (!id) {
-    process.stderr.write(`usage: agentguard ${action === 'ALLOW' ? 'approve' : 'deny'} <violation-id>   (list ids with \`agentguard pending\`)\n`);
+    process.stderr.write(`usage: cerberus ${action === 'ALLOW' ? 'approve' : 'deny'} <violation-id>   (list ids with \`cerberus pending\`)\n`);
     process.exit(1);
   }
   const r = await engineFetch('/decision', { method: 'POST', body: JSON.stringify({ type: 'decision', violationId: id, action }) });
   if (r.ok) process.stdout.write(`${action === 'ALLOW' ? '✓ approved' : '⛔ denied'} ${id}\n`);
   else {
-    process.stderr.write(`AgentGuard: decision failed (${r.status}). Is the engine running, and is the id still pending?\n`);
+    process.stderr.write(`Cerberus: decision failed (${r.status}). Is the engine running, and is the id still pending?\n`);
     process.exit(1);
   }
 }
 
-/** `agentguard pending` — list calls currently held for review, with their ids (M4-C, D41). */
+/** `cerberus pending` — list calls currently held for review, with their ids (M4-C, D41). */
 async function runPending(): Promise<void> {
   let r: Response;
   try {
     r = await engineFetch('/pending');
   } catch {
-    process.stderr.write('AgentGuard: cannot reach the engine. Start it with `agentguard engine`.\n');
+    process.stderr.write('Cerberus: cannot reach the engine. Start it with `cerberus engine`.\n');
     process.exit(1);
   }
-  if (!r.ok) { process.stderr.write(`AgentGuard: /pending returned ${r.status}.\n`); process.exit(1); }
+  if (!r.ok) { process.stderr.write(`Cerberus: /pending returned ${r.status}.\n`); process.exit(1); }
   const { pending } = (await r.json()) as {
     pending: { id: string; toolCall: { tool: string }; reason: string; risk?: { score: number } }[];
   };
@@ -103,7 +103,7 @@ async function runPending(): Promise<void> {
   for (const v of pending) {
     process.stdout.write(
       `  ${v.id}  ${v.toolCall.tool}${v.risk ? ` · risk=${v.risk.score}` : ''}\n    ${v.reason}\n` +
-        `    → agentguard approve ${v.id}    ·    agentguard deny ${v.id}\n`,
+        `    → cerberus approve ${v.id}    ·    cerberus deny ${v.id}\n`,
     );
   }
 }
@@ -123,7 +123,7 @@ async function main(): Promise<void> {
   if (cmd === 'deny') return runDecision('BLOCK', process.argv[3]);
   if (cmd === 'pending') return runPending();
   process.stderr.write(
-    'usage: agentguard <command>\n\n' +
+    'usage: cerberus <command>\n\n' +
       '  init [--agent claude|codex|cursor|cline] [--global] [--print]   wire the hooks into the agent\n' +
       '  engine                      start the gateway (HTTP hold + WS) and serve the dashboard\n' +
       '  hook                        the Claude Code hook entry (spawned per tool call)\n' +
@@ -134,6 +134,6 @@ async function main(): Promise<void> {
 }
 
 main().catch((err: unknown) => {
-  process.stderr.write(`AgentGuard: ${err instanceof Error ? err.message : String(err)}\n`);
+  process.stderr.write(`Cerberus: ${err instanceof Error ? err.message : String(err)}\n`);
   process.exit(1);
 });
