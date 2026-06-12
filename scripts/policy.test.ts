@@ -39,6 +39,28 @@ expect('AskUserQuestion → ALLOW', tool('AskUserQuestion'), 'ALLOW', 'allow-ben
 expect('TodoWrite → ALLOW', tool('TodoWrite'), 'ALLOW', 'allow-benign-builtins');
 expect('Read → ALLOW (read category)', tool('Read'), 'ALLOW', 'allow-read-category');
 
+// ── #4 completion: chmod / kill ──
+expect('chmod 777 → HITL', cmd('Bash', 'chmod 777 deploy.sh'), 'HITL', 'hitl-chmod-permissive');
+expect('chmod -R 777 → HITL', cmd('Bash', 'chmod -R 777 .'), 'HITL', 'hitl-chmod-permissive');
+expect('kill -9 → HITL', cmd('Bash', 'kill -9 1234'), 'HITL', 'hitl-kill-process');
+expect('Stop-Process -Force → HITL', cmd('PowerShell', 'Stop-Process -Id 5 -Force'), 'HITL', 'hitl-kill-process');
+
+// ── #2: sensitive-path protection ──
+const read = (p: string): MCPToolCall => ({ tool: 'Read', input: { file_path: p } });
+expect('Read ~/.ssh/id_rsa → HITL', read('/Users/x/.ssh/id_rsa'), 'HITL', 'hitl-sensitive-path');
+expect('Read ~/.aws/credentials → HITL', read('/home/x/.aws/credentials'), 'HITL', 'hitl-sensitive-path');
+expect('Read /etc/passwd → HITL', read('/etc/passwd'), 'HITL', 'hitl-sensitive-path');
+expect('cat ~/.ssh/id_rsa → HITL', cmd('Bash', 'cat ~/.ssh/id_rsa'), 'HITL', 'hitl-sensitive-path-cmd');
+expect('Read a normal project file → ALLOW (not over-broad)', read('src/index.ts'), 'ALLOW', 'allow-read-category');
+
+// ── #3: egress destination policy ──
+const fetchUrl = (u: string): MCPToolCall => ({ tool: 'WebFetch', input: { url: u } });
+expect('egress github.com → ALLOW (trusted)', fetchUrl('https://github.com/x/y'), 'ALLOW', 'allow-egress-trusted');
+expect('egress api.openai.com → ALLOW (trusted)', fetchUrl('https://api.openai.com/v1/x'), 'ALLOW', 'allow-egress-trusted');
+expect('egress pastebin.com → HITL (suspicious)', fetchUrl('https://pastebin.com/raw/x'), 'HITL', 'hitl-egress-suspicious');
+expect('egress raw IP → HITL (suspicious)', fetchUrl('http://203.0.113.5/collect'), 'HITL', 'hitl-egress-suspicious');
+expect('egress unknown host → HITL (catch-all)', fetchUrl('https://random-thing.xyz'), 'HITL', 'hitl-egress-category');
+
 // ── Still fail-closed for genuinely unknown tools ──
 expect('Write → HITL (write category)', tool('Write'), 'HITL', 'hitl-write-category');
 expect('unknown mcp tool → HITL (fail-closed)', tool('mcp__weird__exfil'), 'HITL');

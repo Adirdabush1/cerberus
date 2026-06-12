@@ -74,14 +74,52 @@ rules:
     when:
       matches: ["(^|\\s)sudo\\s", { var: command }]
 
+  - id: hitl-chmod-permissive
+    description: "Making a file world-writable/executable (chmod 777, icacls grant Everyone) requires approval."
+    action: HITL
+    when:
+      matches: ["\\bchmod\\s+(-[a-zA-Z]+\\s+)*(0?777|a\\+rwx)\\b|\\bicacls\\b[^|;&]*/grant[^|;&]*(Everyone|Users)", { var: command }]
+
+  - id: hitl-kill-process
+    description: "Force-killing processes (kill -9, killall, taskkill /f, Stop-Process -Force) requires approval."
+    action: HITL
+    when:
+      matches: ["\\b(kill\\s+-(9|KILL)|killall|pkill)\\b|\\btaskkill\\b[^|;&]*/f|\\bStop-Process\\b[^|;&]*-Force", { var: command }]
+
+  # ── Sensitive-path protection (data-at-rest). Edit these patterns to fit your environment. ──
+  - id: hitl-sensitive-path
+    description: "Reading a sensitive path (SSH/AWS/GPG/kube keys, credential files, /etc/passwd) requires approval."
+    action: HITL
+    when:
+      matches: ["(^|[/\\\\])\\.(ssh|aws|gnupg|kube)[/\\\\]|(^|[/\\\\])\\.(git-credentials|netrc|npmrc|pypirc)$|(^|[/\\\\])id_(rsa|dsa|ecdsa|ed25519)\\b|\\.pem$|[/\\\\]etc[/\\\\](passwd|shadow)\\b", { var: path }]
+
+  - id: hitl-sensitive-path-cmd
+    description: "Reading a sensitive path via the shell requires approval."
+    action: HITL
+    when:
+      matches: ["\\b(cat|less|more|head|tail|xxd|od|strings|Get-Content|gc|type)\\b.*((^|[/\\\\])\\.(ssh|aws|gnupg|kube)[/\\\\]|id_(rsa|dsa|ecdsa|ed25519)|\\.pem\\b|\\.git-credentials|\\.netrc|[/\\\\]etc[/\\\\](passwd|shadow))", { var: command }]
+
   - id: hitl-write-category
     description: "Writing or editing a file requires human approval."
     action: HITL
     when:
       "==": [{ var: category }, "WRITE"]
 
+  # ── Egress destination policy (evaluated before the generic egress catch-all). ──
+  - id: hitl-egress-suspicious
+    description: "Outbound call to a known data-sink / unverified host (paste site, webhook catcher, raw IP) — review."
+    action: HITL
+    when:
+      matches: ["https?://(\\d{1,3}\\.){3}\\d{1,3}([:/]|$)|https?://([^/]*\\.)?(pastebin\\.com|hastebin|ghostbin|webhook\\.site|requestbin|pipedream\\.net|beeceptor|ngrok\\.io|transfer\\.sh|0x0\\.st|file\\.io|termbin\\.com)", { var: url }]
+
+  - id: allow-egress-trusted
+    description: "Outbound calls to well-known developer hosts (registries, GitHub, OpenAI/Anthropic APIs) are auto-approved (a loaded secret still gates egress via the content signal)."
+    action: ALLOW
+    when:
+      matches: ["^https?://([^/]*\\.)?(github\\.com|githubusercontent\\.com|api\\.openai\\.com|api\\.anthropic\\.com|registry\\.npmjs\\.org|npmjs\\.com|pypi\\.org|files\\.pythonhosted\\.org|crates\\.io|sum\\.golang\\.org|proxy\\.golang\\.org|gitlab\\.com|bitbucket\\.org)([:/]|$)", { var: url }]
+
   - id: hitl-egress-category
-    description: "Outbound network calls require human approval."
+    description: "Other outbound network calls require human approval."
     action: HITL
     when:
       "==": [{ var: category }, "EGRESS"]
