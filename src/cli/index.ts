@@ -3,7 +3,7 @@
  *   cerberus engine   start the long-running Engine (HTTP hold + WS dashboard feed)
  *   cerberus hook      run the PreToolUse hook (Claude Code spawns this per tool call)
  */
-import { existsSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join, resolve } from 'node:path';
 import { Engine } from '../engine/server.js';
@@ -108,9 +108,39 @@ async function runPending(): Promise<void> {
   }
 }
 
+/** `cerberus scan-mcp <manifest.json>` — static scan of an MCP tools/list for poisoned descriptions (M7.3). */
+async function runScanMcp(file: string | undefined): Promise<void> {
+  if (!file || !existsSync(file)) {
+    process.stderr.write('usage: cerberus scan-mcp <tools.json>   (an MCP `tools/list` result, or [{name,description,inputSchema}])\n');
+    process.exit(1);
+  }
+  const { scanManifest, toolsFrom } = await import('../signals/tool-scan.js');
+  const tools = toolsFrom(JSON.parse(readFileSync(file, 'utf8')));
+  if (tools.length === 0) {
+    process.stderr.write('Cerberus: no tools found in that file (expected an array, {tools:[…]}, or a tools/list result).\n');
+    process.exit(1);
+  }
+  const findings = await scanManifest(tools);
+  const HIGH = 0.85;
+  if (findings.length === 0) {
+    process.stdout.write(`✓ scanned ${tools.length} tool(s) — no tool-poisoning indicators.\n`);
+    return;
+  }
+  for (const f of findings) {
+    process.stdout.write(
+      `${f.score >= HIGH ? '⛔ POISONED' : '⚠ suspicious'}  ${f.tool}  (score ${f.score.toFixed(2)})\n` +
+        f.reasons.map((r) => `    - ${r}`).join('\n') + '\n',
+    );
+  }
+  const high = findings.filter((f) => f.score >= HIGH).length;
+  process.stdout.write(`\n${findings.length} flagged of ${tools.length} (${high} poisoned). Review before trusting this MCP server.\n`);
+  process.exit(high > 0 ? 1 : 0); // non-zero so CI / scripts can gate on a poisoned tool
+}
+
 async function main(): Promise<void> {
   const cmd = process.argv[2];
   if (cmd === 'engine') return runEngine();
+  if (cmd === 'scan-mcp') return runScanMcp(process.argv[3]);
   if (cmd === 'hook') {
     await import('../hook/index.js');
     return;
@@ -128,7 +158,8 @@ async function main(): Promise<void> {
       '  engine                      start the gateway (HTTP hold + WS) and serve the dashboard\n' +
       '  hook                        the Claude Code hook entry (spawned per tool call)\n' +
       '  pending                     list calls held for review (with their ids)\n' +
-      '  approve <id> | deny <id>    resolve a held call from the terminal\n',
+      '  approve <id> | deny <id>    resolve a held call from the terminal\n' +
+      '  scan-mcp <tools.json>       scan an MCP tools/list for poisoned tool descriptions\n',
   );
   process.exit(1);
 }

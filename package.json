@@ -47,6 +47,7 @@
     "build:engine": "tsc",
     "build:dashboard": "npm --prefix dashboard run build",
     "prepublishOnly": "npm run build",
+    "test:toolscan": "tsx scripts/tool-scan.test.ts",
     "test:behavioral": "tsx scripts/behavioral.test.ts",
     "e2e:behavioral": "node scripts/behavioral-e2e.mjs",
     "test:content": "tsx scripts/content.test.ts",
