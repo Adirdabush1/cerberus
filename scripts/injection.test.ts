@@ -57,6 +57,20 @@ const egress = (sid: string): MCPToolCall => ({ tool: 'WebFetch', input: { url: 
   check('injection-flagged session → egress HITL', v.action === 'HITL' && v.kind === 'content-injection', JSON.stringify(v));
 }
 
+// ── M7: injection posture also gates a WRITE (not just egress) ──
+{
+  const mon = new InMemoryContaminationMonitor(cfg);
+  mon.flagInjection('w', 0.95, 'WebFetch');
+  const v = mon.evaluate({ tool: 'Write', input: { file_path: 'x.ts' }, sessionId: 'w' });
+  check('injection posture gates WRITE → content-injection HITL', v.action === 'HITL' && v.kind === 'content-injection', JSON.stringify(v));
+}
+// ── …but does NOT gate a read-only execute (no noise) ──
+{
+  const mon = new InMemoryContaminationMonitor(cfg);
+  mon.flagInjection('e', 0.95, 'WebFetch');
+  check('injection posture does NOT gate plain execute (no noise)', mon.evaluate({ tool: 'Bash', input: { command: 'ls' }, sessionId: 'e' }).action === null);
+}
+
 // ── a confirmed secret outranks an injection flag (content-exfil wins) ──
 {
   const mon = new InMemoryContaminationMonitor(cfg);

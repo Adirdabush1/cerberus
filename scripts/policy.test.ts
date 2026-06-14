@@ -61,6 +61,13 @@ expect('egress pastebin.com → HITL (suspicious)', fetchUrl('https://pastebin.c
 expect('egress raw IP → HITL (suspicious)', fetchUrl('http://203.0.113.5/collect'), 'HITL', 'hitl-egress-suspicious');
 expect('egress unknown host → HITL (catch-all)', fetchUrl('https://random-thing.xyz'), 'HITL', 'hitl-egress-category');
 
+// ── M7 Step 2: persistence / backdoor-write protection ──
+const write = (p: string): MCPToolCall => ({ tool: 'Write', input: { file_path: p } });
+expect('echo >> ~/.ssh/authorized_keys → HITL (closes the echo auto-allow hole)', cmd('Bash', 'echo "ssh-rsa AAAA" >> ~/.ssh/authorized_keys'), 'HITL', 'hitl-persistence-write');
+expect('Write to ~/.bashrc → HITL (persistence)', write('/home/u/.bashrc'), 'HITL', 'hitl-persistence-write');
+expect('append to a git hook → HITL (persistence)', cmd('Bash', 'echo evil >> .git/hooks/pre-commit'), 'HITL', 'hitl-persistence-write');
+expect('plain `echo hello` still ALLOW (no false positive)', cmd('Bash', 'echo hello'), 'ALLOW', 'allow-readonly-commands');
+
 // ── Still fail-closed for genuinely unknown tools ──
 expect('Write → HITL (write category)', tool('Write'), 'HITL', 'hitl-write-category');
 expect('unknown mcp tool → HITL (fail-closed)', tool('mcp__weird__exfil'), 'HITL');

@@ -86,6 +86,16 @@ rules:
     when:
       matches: ["\\b(kill\\s+-(9|KILL)|killall|pkill)\\b|\\btaskkill\\b[^|;&]*/f|\\bStop-Process\\b[^|;&]*-Force", { var: command }]
 
+  # ── Persistence / backdoor-write protection (M7). Catches the classic injection payload — and the
+  #    hole where `echo … >> ~/.ssh/authorized_keys` is auto-allowed because it starts with `echo`. ──
+  - id: hitl-persistence-write
+    description: "Writing to a shell-startup / SSH authorized_keys / cron / launchd / git-hooks path (a backdoor/persistence vector) requires approval."
+    action: HITL
+    when:
+      or:
+        - matches: ["(^|[/\\\\])\\.ssh[/\\\\]authorized_keys$|(^|[/\\\\])\\.git[/\\\\]hooks[/\\\\]|[/\\\\]etc[/\\\\](cron|systemd)|[/\\\\]Library[/\\\\]Launch(Agents|Daemons)[/\\\\]|(^|[/\\\\])\\.(bashrc|zshrc|bash_profile|zprofile|profile)$", { var: path }]
+        - matches: ["(>>?|\\btee\\b)[^|;&\\n]*(\\.ssh[/\\\\]authorized_keys|\\.git[/\\\\]hooks[/\\\\]|/etc/(cron|systemd)|/Library/Launch(Agents|Daemons)|(^|[/\\\\])\\.(bashrc|zshrc|bash_profile|zprofile|profile))|\\bcrontab\\b[^|;&\\n]*(-(?!l\\b)|\\S+\\.)", { var: command }]
+
   # ── Sensitive-path protection (data-at-rest). Edit these patterns to fit your environment. ──
   - id: hitl-sensitive-path
     description: "Reading a sensitive path (SSH/AWS/GPG/kube keys, credential files, /etc/passwd) requires approval."

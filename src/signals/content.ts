@@ -146,10 +146,13 @@ export class InMemoryContaminationMonitor implements ContaminationMonitor {
       st.path = { paths, lastTs: now };
     }
 
-    // Enforcement (D4/D12): only EGRESS is gated. Content-confirmed taint (a real secret) is the
-    // strongest case; a live injection flag also raises posture. path-only risk stays audit/allow.
+    // Enforcement (D4/D12): EGRESS is gated for exfil/injection/path-risk. Under a live injection
+    // posture (M7) a WRITE is ALSO gated — a poisoned instruction's classic payload is the agent
+    // writing a backdoor; the file write is already HITL, but attributing it to the injection (and
+    // letting it stack in the risk score) surfaces "this write may be attacker-driven".
     let verdict: ContentVerdict = NO_VERDICT;
-    if (classify(call.tool) === 'EGRESS') {
+    const cat = classify(call.tool);
+    if (cat === 'EGRESS') {
       // M6: precise content-match — does the OUTBOUND payload actually carry a loaded secret?
       // This is the strongest exfil evidence; reported with provenance + confidence, never the value.
       const hit = st.content?.secrets?.length ? matchSecret(st.content.secrets, payloadOf(call, this.cfg.scanLimitBytes)) : null;
@@ -182,6 +185,12 @@ export class InMemoryContaminationMonitor implements ContaminationMonitor {
           kind: 'path-risk',
         };
       }
+    } else if (cat === 'WRITE' && st.injection) {
+      verdict = {
+        action: 'HITL',
+        reason: `Raised posture: a prior tool result (${st.injection.tool}) was flagged as prompt-injection (score ${st.injection.score.toFixed(2)}); the agent is now WRITING via ${call.tool}. A poisoned instruction may be driving this write — approve only if expected.`,
+        kind: 'content-injection',
+      };
     }
 
     this.evictIfClean(sessionId, now);
