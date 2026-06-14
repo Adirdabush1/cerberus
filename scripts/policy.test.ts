@@ -79,6 +79,10 @@ expect('git commit → ALLOW', cmd('Bash', 'git commit -m "wip"'), 'ALLOW', 'all
 expect('mkdir -p → ALLOW', cmd('Bash', 'mkdir -p src/lib'), 'ALLOW', 'allow-dev-commands');
 expect('npm run build → ALLOW', cmd('Bash', 'npm run build'), 'ALLOW', 'allow-dev-commands');
 expect('npm test → ALLOW', cmd('Bash', 'npm test'), 'ALLOW'); // already covered by allow-readonly-commands
+expect('node script.js → ALLOW (local interpreter)', cmd('Bash', 'node scripts/build.js'), 'ALLOW', 'allow-dev-commands');
+expect('python3 → ALLOW (local interpreter)', cmd('Bash', 'python3 manage.py migrate'), 'ALLOW', 'allow-dev-commands');
+expect('npx tsx → ALLOW (local interpreter)', cmd('Bash', 'npx tsx scripts/x.ts'), 'ALLOW', 'allow-dev-commands');
+expect("python -c with rm -rf still → BLOCK (rm guard wins inside -c)", cmd('Bash', 'python -c "import os; os.system(\'rm -rf /\')"'), 'BLOCK', 'block-rm-rf');
 expect('git push still → HITL (push guard wins over dev-allow)', cmd('Bash', 'git push origin main'), 'HITL', 'hitl-git-push');
 expect('npm install still → HITL (supply-chain surface stays gated)', cmd('Bash', 'npm install left-pad'), 'HITL');
 expect('git clone still → HITL (remote-fetch surface stays gated)', cmd('Bash', 'git clone https://x/y'), 'HITL');

@@ -157,11 +157,11 @@ rules:
         - { var: command }
 
   - id: allow-dev-commands
-    description: "Common non-destructive dev commands (local git, scaffolding, project build/test) are auto-approved for daily use. Dangerous forms are caught by the BLOCK/HITL guards above: rm -rf, pipe-to-shell, sudo, chmod, kill, sensitive-path, persistence-write, git push, publish. Note this deliberately EXCLUDES dependency installs (npm/pip/cargo install), git clone, curl/wget, and bare interpreters (node/python) — those stay gated as a privileged/remote-fetch surface."
+    description: "Common non-destructive dev commands (local git, scaffolding, project build/test, local interpreters) are auto-approved for daily use. Dangerous forms are caught by the BLOCK/HITL guards above: rm -rf, pipe-to-shell, sudo, chmod, kill, sensitive-path, persistence-write, git push, publish. Note this deliberately EXCLUDES dependency installs (npm/pip/cargo install), git clone, and curl/wget — those stay gated as a supply-chain / remote-fetch surface."
     action: ALLOW
     when:
       matches:
-        - "^\\s*(git\\s+(add|commit|checkout|switch|restore|stash|fetch|pull|merge|rebase|tag|init|cherry-pick|clean\\s+-n)|mkdir|touch|cp|mv|ln|mktemp|npm\\s+(run|test|start)|yarn\\s+(run|test|build|lint)|pnpm\\s+(run|test|build|lint)|make|tsc|jest|vitest|mocha|eslint|prettier|cargo\\s+(build|test|check|fmt|clippy|run)|go\\s+(build|test|run|fmt|vet)|pytest|ruff|mypy|gradle|mvn)\\b"
+        - "^\\s*(git\\s+(add|commit|checkout|switch|restore|stash|fetch|pull|merge|rebase|tag|init|cherry-pick|clean\\s+-n)|mkdir|touch|cp|mv|ln|mktemp|npm\\s+(run|test|start)|yarn\\s+(run|test|build|lint)|pnpm\\s+(run|test|build|lint)|node|python3?|npx|ts-node|tsx|deno\\s+(run|test|fmt|lint)|make|tsc|jest|vitest|mocha|eslint|prettier|cargo\\s+(build|test|check|fmt|clippy|run)|go\\s+(build|test|run|fmt|vet)|pytest|ruff|mypy|gradle|mvn)\\b"
         - { var: command }
 
   - id: allow-readonly-powershell
