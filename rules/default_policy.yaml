@@ -109,9 +109,14 @@ rules:
     when:
       matches: ["\\b(cat|less|more|head|tail|xxd|od|strings|Get-Content|gc|type)\\b.*((^|[/\\\\])\\.(ssh|aws|gnupg|kube)[/\\\\]|id_(rsa|dsa|ecdsa|ed25519)|\\.pem\\b|\\.git-credentials|\\.netrc|[/\\\\]etc[/\\\\](passwd|shadow))", { var: command }]
 
-  - id: hitl-write-category
-    description: "Writing or editing a file requires human approval."
-    action: HITL
+  # Ordinary file writes are auto-approved so the agent can work day-to-day. This is safe because the
+  # rules ABOVE this one (first-match-wins) already gate every dangerous write TARGET — .env (BLOCK),
+  # shell-startup / authorized_keys / cron / launchd / git-hooks (hitl-persistence-write), and SSH/AWS/
+  # cred paths (hitl-sensitive-path). A write driven by a poisoned instruction is still held by the
+  # content signal (content-injection), independent of this rule. Every write is still audit-logged.
+  - id: allow-write-category
+    description: "Writing or editing an ordinary file is auto-approved (dangerous targets are gated by the rules above)."
+    action: ALLOW
     when:
       "==": [{ var: category }, "WRITE"]
 
@@ -149,6 +154,14 @@ rules:
     when:
       matches:
         - "^\\s*(ls|pwd|echo|cat|grep|rg|find|head|tail|wc|which|whoami|date|env|printenv|tree|stat|file|git\\s+(status|log|diff|branch|show|remote|rev-parse)|node\\s+-v|npm\\s+(test|ls|run\\s+test)|cargo\\s+check)\\b"
+        - { var: command }
+
+  - id: allow-dev-commands
+    description: "Common non-destructive dev commands (local git, scaffolding, project build/test) are auto-approved for daily use. Dangerous forms are caught by the BLOCK/HITL guards above: rm -rf, pipe-to-shell, sudo, chmod, kill, sensitive-path, persistence-write, git push, publish. Note this deliberately EXCLUDES dependency installs (npm/pip/cargo install), git clone, curl/wget, and bare interpreters (node/python) — those stay gated as a privileged/remote-fetch surface."
+    action: ALLOW
+    when:
+      matches:
+        - "^\\s*(git\\s+(add|commit|checkout|switch|restore|stash|fetch|pull|merge|rebase|tag|init|cherry-pick|clean\\s+-n)|mkdir|touch|cp|mv|ln|mktemp|npm\\s+(run|test|start)|yarn\\s+(run|test|build|lint)|pnpm\\s+(run|test|build|lint)|make|tsc|jest|vitest|mocha|eslint|prettier|cargo\\s+(build|test|check|fmt|clippy|run)|go\\s+(build|test|run|fmt|vet)|pytest|ruff|mypy|gradle|mvn)\\b"
         - { var: command }
 
   - id: allow-readonly-powershell

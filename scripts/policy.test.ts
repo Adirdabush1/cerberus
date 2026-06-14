@@ -68,8 +68,23 @@ expect('Write to ~/.bashrc → HITL (persistence)', write('/home/u/.bashrc'), 'H
 expect('append to a git hook → HITL (persistence)', cmd('Bash', 'echo evil >> .git/hooks/pre-commit'), 'HITL', 'hitl-persistence-write');
 expect('plain `echo hello` still ALLOW (no false positive)', cmd('Bash', 'echo hello'), 'ALLOW', 'allow-readonly-commands');
 
+// ── Daily-usability recalibration: ordinary writes + basic dev commands auto-approve,
+//    but the dangerous-target guards above still win (first-match-wins ordering). ──
+expect('Write (ordinary file) → ALLOW (daily usability)', tool('Write'), 'ALLOW', 'allow-write-category');
+expect('Edit (ordinary file) → ALLOW', tool('Edit'), 'ALLOW', 'allow-write-category');
+expect('Write to ~/.bashrc still → HITL (persistence guard wins)', write('/home/u/.bashrc'), 'HITL', 'hitl-persistence-write');
+expect('Write to .env still → BLOCK (env guard wins)', write('/proj/.env'), 'BLOCK', 'block-env-read-path');
+expect('git add → ALLOW (basic dev)', cmd('Bash', 'git add -A'), 'ALLOW', 'allow-dev-commands');
+expect('git commit → ALLOW', cmd('Bash', 'git commit -m "wip"'), 'ALLOW', 'allow-dev-commands');
+expect('mkdir -p → ALLOW', cmd('Bash', 'mkdir -p src/lib'), 'ALLOW', 'allow-dev-commands');
+expect('npm run build → ALLOW', cmd('Bash', 'npm run build'), 'ALLOW', 'allow-dev-commands');
+expect('npm test → ALLOW', cmd('Bash', 'npm test'), 'ALLOW'); // already covered by allow-readonly-commands
+expect('git push still → HITL (push guard wins over dev-allow)', cmd('Bash', 'git push origin main'), 'HITL', 'hitl-git-push');
+expect('npm install still → HITL (supply-chain surface stays gated)', cmd('Bash', 'npm install left-pad'), 'HITL');
+expect('git clone still → HITL (remote-fetch surface stays gated)', cmd('Bash', 'git clone https://x/y'), 'HITL');
+expect('git add then cat ssh key still → HITL (sensitive-path-cmd guard wins)', cmd('Bash', 'git add . && cat ~/.ssh/id_rsa'), 'HITL', 'hitl-sensitive-path-cmd');
+
 // ── Still fail-closed for genuinely unknown tools ──
-expect('Write → HITL (write category)', tool('Write'), 'HITL', 'hitl-write-category');
 expect('unknown mcp tool → HITL (fail-closed)', tool('mcp__weird__exfil'), 'HITL');
 
 console.log(`\n${pass} passed, ${fail} failed`);
