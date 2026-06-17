@@ -18,6 +18,7 @@ export const AUDIT_EVENTS: ReadonlySet<AuditEvent> = new Set<AuditEvent>([
   'session-ended',
   'taint-loaded',
   'injection-detected',
+  'escalated',
   'tool-failed',
 ]);
 

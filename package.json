@@ -62,7 +62,8 @@
     "test:notify": "tsx scripts/notify.test.ts",
     "test:security": "tsx scripts/security.test.ts",
     "test:policy": "tsx scripts/policy.test.ts",
-    "test:adapters": "tsx scripts/adapters.test.ts"
+    "test:adapters": "tsx scripts/adapters.test.ts",
+    "test:escalation": "tsx scripts/escalation.test.ts"
   },
   "dependencies": {
     "js-yaml": "^4.1.0",

@@ -33,6 +33,15 @@ import {
   type InjectionConfig,
 } from '../signals/injection.js';
 import { WeightedRiskEngine, type RiskEngine } from '../risk/engine.js';
+import {
+  ApprovalGrants,
+  NoopNotifier,
+  fingerprint,
+  signToken,
+  verifyToken,
+  type EscalationConfig,
+  type Notifier,
+} from './escalation.js';
 import { AuditLog } from '../audit/index.js';
 import { projectTimeline, summarizeSessions } from '../audit/projector.js';
 import { classify } from '../taxonomy/index.js';
@@ -70,6 +79,10 @@ export interface EngineOptions {
   autoOpen?: 'block' | 'off';
   /** Opener injection seam (tests pass a spy); defaults to the platform browser-opener. */
   opener?: (url: string) => void;
+  /** Out-of-band escalation (M8). Absent ⇒ feature off (no grace timer, /approve + /deny 404). */
+  escalation?: EscalationConfig;
+  /** Notifier seam (tests pass a spy); defaults to NoopNotifier when escalation is on. */
+  notifier?: Notifier;
 }
 
 const AUTO_OPEN_WINDOW_MS = 30_000; // don't reopen the same session's tab more than once per window
@@ -81,6 +94,9 @@ export class Engine {
   private readonly risk: RiskEngine;
   private injection: InjectionClassifier = new DisabledInjectionClassifier();
   private readonly store = new InMemoryPendingStore();
+  private readonly grants = new ApprovalGrants(); // M8: one-shot OOB-approved fingerprints
+  private readonly notifier: Notifier;
+  private readonly usedTokens = new Set<string>(); // M8: enforce single-use approve/deny links
   private readonly lastOpened = new Map<string, number>(); // session → last auto-open ts (rate-limit)
   private readonly audit: AuditLog;
   private readonly clients = new Set<WebSocket>();
@@ -101,6 +117,7 @@ export class Engine {
     this.contamination = new InMemoryContaminationMonitor(opts.content);
     this.risk = new WeightedRiskEngine(opts.weightsPath);
     this.audit = new AuditLog(opts.auditFile);
+    this.notifier = opts.notifier ?? new NoopNotifier();
 
     // fan out store lifecycle to every connected dashboard
     this.store.on('registered', (v: SecurityViolation) => this.broadcast({ type: 'violation', violation: v }));
@@ -166,6 +183,15 @@ export class Engine {
         await this.store.resolveContext(body.violationId, body.action);
         return json(res, 200, { ok: true });
       }
+      // M8 out-of-band approve/deny — token-authenticated (HMAC, single-use, fingerprint-bound), so
+      // unlike /decision these are safe even if the user fronts the port with a tunnel. GET so a plain
+      // email/push link works from a phone with no client.
+      if (req.method === 'GET' && req.url?.startsWith('/approve')) {
+        return this.handleOob(req, res, 'ALLOW');
+      }
+      if (req.method === 'GET' && req.url?.startsWith('/deny')) {
+        return this.handleOob(req, res, 'BLOCK');
+      }
       if (req.method === 'POST' && req.url === '/intercept') {
         return await this.handleIntercept(req, res);
       }
@@ -210,6 +236,13 @@ export class Engine {
 
     const base = { sessionId: call.sessionId, requestId, tool: call.tool, input: call.input, category, ruleId, signal, risk };
 
+    // M8: a prior out-of-band approval grants the NEXT retry of this exact call (Option C). Consumed
+    // once, never overrides a hard-floor BLOCK (absolute prohibitions stay absolute — README invariant).
+    if (this.opts.escalation && action !== 'ALLOW' && !risk.hardFloor && this.grants.consume(fingerprint(call), Date.now())) {
+      this.writeAudit({ ...base, event: 'decision', action: 'ALLOW', reason: 'Cerberus: approved out-of-band (one-shot grant).', viaHitl: true });
+      return json(res, 200, { action: 'ALLOW', reason: 'Cerberus: approved out-of-band (one-shot grant).', band: risk.band, sessionId: call.sessionId });
+    }
+
     // Auto paths: answer immediately. (AUDIT band collapses to ALLOW for the agent — D17 — but the
     // audit record carries risk.band='AUDIT' so it surfaces as elevated-risk on the dashboard.)
     if (action === 'ALLOW' || action === 'BLOCK') {
@@ -249,8 +282,19 @@ export class Engine {
     });
 
     this.writeAudit({ ...base, event: 'hitl-opened', reason });
+
+    // M8: if nobody decides locally within the grace window, escalate out-of-band. The timer is
+    // cleared the moment the hold resolves (decision / TTL / disconnect), so a promptly-answered call
+    // never escalates.
+    let escTimer: NodeJS.Timeout | undefined;
+    if (this.opts.escalation) {
+      escTimer = setTimeout(() => void this.escalate(violation), this.opts.escalation.graceMs);
+      escTimer.unref?.();
+    }
+
     const result = await this.store.registerContext(violation, this.opts.ttlMs);
     settled = true;
+    if (escTimer) clearTimeout(escTimer);
 
     // The store only ever resolves a hold to ALLOW/BLOCK (never ASK) — narrow for the audit/verdict.
     const resolved = result.action as FinalAction;
@@ -286,6 +330,75 @@ export class Engine {
     } catch {
       /* best-effort */
     }
+  }
+
+  /**
+   * M8: a held call has gone unanswered for the grace period. If it's still pending, mint signed
+   * single-use approve/deny links and hand them to the notifier. Best-effort: a failed notify never
+   * affects the hold (which still resolves on its own TTL).
+   */
+  private async escalate(violation: SecurityViolation): Promise<void> {
+    const cfg = this.opts.escalation;
+    if (!cfg) return;
+    if (!this.store.pending().some((v) => v.id === violation.id)) return; // already resolved — no-op
+
+    const fp = fingerprint(violation.toolCall);
+    const exp = Date.now() + cfg.grantTtlMs;
+    const link = (act: FinalAction): string =>
+      `${cfg.publicBaseUrl}/${act === 'ALLOW' ? 'approve' : 'deny'}?token=${encodeURIComponent(signToken({ fp, vid: violation.id, act, exp }, cfg.signingKey))}`;
+
+    this.writeAudit({
+      event: 'escalated',
+      sessionId: violation.toolCall.sessionId,
+      requestId: violation.id,
+      tool: violation.toolCall.tool,
+      category: violation.category,
+      signal: violation.signal,
+      risk: violation.risk,
+      reason: `Held call unanswered for ${cfg.graceMs}ms — escalated out-of-band via ${this.notifier.name}.`,
+    });
+
+    try {
+      await this.notifier.notify({
+        violationId: violation.id,
+        tool: violation.toolCall.tool,
+        reason: violation.reason,
+        riskScore: violation.risk?.score,
+        sessionId: violation.toolCall.sessionId,
+        approveUrl: link('ALLOW'),
+        denyUrl: link('BLOCK'),
+      });
+    } catch {
+      /* best-effort — notify failures never affect enforcement */
+    }
+  }
+
+  /**
+   * M8: resolve an out-of-band approve/deny link. The signed, single-use token IS the auth. If the
+   * original call is still held this instant, release it live; either way an ALLOW arms a one-shot
+   * grant so the agent's retry within grantTtlMs passes once.
+   */
+  private async handleOob(req: IncomingMessage, res: ServerResponse, action: FinalAction): Promise<void> {
+    const cfg = this.opts.escalation;
+    if (!cfg) return html(res, 404, 'Out-of-band approval is disabled on this engine.');
+
+    const token = new URL(req.url ?? '/', 'http://127.0.0.1').searchParams.get('token') ?? '';
+    if (this.usedTokens.has(token)) return html(res, 410, 'This link was already used.');
+    const p = verifyToken(token, cfg.signingKey, Date.now());
+    if (!p || p.act !== action) return html(res, 403, 'Invalid or expired approval link.');
+    this.usedTokens.add(token); // single-use — burn before acting
+
+    const live = this.store.pending().some((v) => v.id === p.vid);
+    if (action === 'ALLOW') {
+      if (live) {
+        await this.store.resolveContext(p.vid, 'ALLOW'); // still held → release it now, no grant needed
+        return html(res, 200, '✓ Approved — the held call has been released.');
+      }
+      this.grants.grant(p.fp, cfg.grantTtlMs, Date.now()); // already blocked → arm the one-shot retry (Option C)
+      return html(res, 200, '✓ Approved — the next retry of this action will be allowed once.');
+    }
+    if (live) await this.store.resolveContext(p.vid, 'BLOCK');
+    return html(res, 200, '⛔ Denied — the call stays blocked.');
   }
 
   /**
@@ -490,6 +603,18 @@ function json(res: ServerResponse, status: number, body: unknown): void {
   const payload = JSON.stringify(body);
   res.writeHead(status, { 'content-type': 'application/json' });
   res.end(payload);
+}
+
+/** Minimal HTML page for the out-of-band approve/deny links (M8) — rendered in a phone browser. */
+function html(res: ServerResponse, status: number, message: string): void {
+  const safe = message.replace(/[<>&]/g, (c) => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;' })[c] as string);
+  res.writeHead(status, { 'content-type': 'text/html; charset=utf-8' });
+  res.end(
+    `<!doctype html><meta name="viewport" content="width=device-width,initial-scale=1">` +
+      `<title>Cerberus</title>` +
+      `<div style="font:16px/1.5 system-ui,sans-serif;max-width:32rem;margin:18vh auto;padding:0 1.5rem;text-align:center">` +
+      `<div style="font-size:1.5rem;margin-bottom:.5rem">🐺 Cerberus</div><p>${safe}</p></div>`,
+  );
 }
 
 function readJson<T>(req: IncomingMessage): Promise<T> {

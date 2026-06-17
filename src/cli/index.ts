@@ -7,6 +7,13 @@ import { existsSync, readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join, resolve } from 'node:path';
 import { Engine } from '../engine/server.js';
+import {
+  CommandNotifier,
+  NoopNotifier,
+  loadSigningKey,
+  type EscalationConfig,
+  type Notifier,
+} from '../engine/escalation.js';
 import { DEFAULT_ANOMALY_CONFIG } from '../signals/behavioral.js';
 import { DEFAULT_CONTENT_CONFIG } from '../signals/content.js';
 import { DEFAULT_INJECTION_CONFIG } from '../signals/injection.js';
@@ -49,7 +56,23 @@ async function runEngine(): Promise<void> {
   // M4-C: terminal approval (HITL → Claude's native in-terminal prompt) by default; dashboard-hold opt-in.
   const approvalSurface = process.env.AG_APPROVAL_SURFACE === 'dashboard' ? 'dashboard' : 'terminal';
 
-  const engine = new Engine({ port, rulesPath, auditFile, ttlMs, behavioral, content, injection, weightsPath, staticDir, autoOpen, approvalSurface });
+  // M8: out-of-band escalation. Off unless AG_ESCALATE=1. Only meaningful on the dashboard-hold surface
+  // (terminal/ASK defers the wait to Claude and the engine never holds), so we warn if mis-paired.
+  let escalation: EscalationConfig | undefined;
+  let notifier: Notifier | undefined;
+  if ((process.env.AG_ESCALATE ?? '0') === '1') {
+    const keyFile = process.env.AG_ESCALATE_KEY ?? join(PROJECT_ROOT, '.cerberus', 'escalation.key');
+    const publicBaseUrl = (process.env.AG_PUBLIC_URL ?? `http://127.0.0.1:${port}`).replace(/\/+$/, '');
+    escalation = {
+      graceMs: Number(process.env.AG_ESCALATE_GRACE_MS ?? 60_000),
+      grantTtlMs: Number(process.env.AG_ESCALATE_GRANT_MS ?? 600_000),
+      signingKey: loadSigningKey(keyFile),
+      publicBaseUrl,
+    };
+    notifier = process.env.AG_NOTIFY_CMD ? new CommandNotifier(process.env.AG_NOTIFY_CMD) : new NoopNotifier();
+  }
+
+  const engine = new Engine({ port, rulesPath, auditFile, ttlMs, behavioral, content, injection, weightsPath, staticDir, autoOpen, approvalSurface, escalation, notifier });
   await engine.listen();
   process.stderr.write(
     `Cerberus engine listening on :${port}\n` +
@@ -60,6 +83,9 @@ async function runEngine(): Promise<void> {
       `  risk: ${weightsPath} (${engine.riskVersion}) → ALLOW/AUDIT/HITL/BLOCK bands\n` +
       `  approval: ${approvalSurface === 'terminal' ? "terminal — HITL → Claude's native prompt (ASK)" : 'dashboard — socket hold + Approve/Deny'}\n` +
       `  auto-open: ${autoOpen === 'block' ? 'on BLOCK/EXFIL' : 'off (set AG_AUTO_OPEN=block)'}\n` +
+      (escalation
+        ? `  escalate: on — grace ${escalation.graceMs}ms → ${notifier?.name ?? 'none'}; remote approve grant ${escalation.grantTtlMs}ms (one-shot)${approvalSurface === 'terminal' ? '  ⚠ needs AG_APPROVAL_SURFACE=dashboard to hold' : ''}\n`
+        : '  escalate: off (set AG_ESCALATE=1)\n') +
       `  dashboard: ${staticDir ? `http://127.0.0.1:${port}/` : '(not built — run `npm run build`)'}  ·  WS ws://127.0.0.1:${port}/ws\n`,
   );
 }
@@ -149,6 +175,10 @@ async function main(): Promise<void> {
     const { runInit } = await import('./init.js');
     return runInit(process.argv.slice(3));
   }
+  if (cmd === 'service') {
+    const { runService } = await import('./service.js');
+    return runService(process.argv[3], PROJECT_ROOT);
+  }
   if (cmd === 'approve') return runDecision('ALLOW', process.argv[3]);
   if (cmd === 'deny') return runDecision('BLOCK', process.argv[3]);
   if (cmd === 'pending') return runPending();
@@ -156,6 +186,7 @@ async function main(): Promise<void> {
     'usage: cerberus <command>\n\n' +
       '  init [--agent claude|codex|cursor|cline] [--global] [--print]   wire the hooks into the agent\n' +
       '  engine                      start the gateway (HTTP hold + WS) and serve the dashboard\n' +
+      '  service <install|uninstall|status>   run the engine always-on in the background (macOS launchd)\n' +
       '  hook                        the Claude Code hook entry (spawned per tool call)\n' +
       '  pending                     list calls held for review (with their ids)\n' +
       '  approve <id> | deny <id>    resolve a held call from the terminal\n' +

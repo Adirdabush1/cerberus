@@ -137,6 +137,7 @@ export type AuditEvent =
   | 'session-ended' //      a Claude Code session ended (SessionEnd hook) — also resets monitors
   | 'taint-loaded' //       a secret entered the agent's context (arms the exfil gate)
   | 'injection-detected' // prompt-injection found in a tool result (raises session posture)
+  | 'escalated' //          a held call went unanswered locally and was escalated out-of-band (M8)
   | 'tool-failed'; //       an executed tool returned an error instead of a result
 
 /** How a held call was resolved (D23). Drives the latency metric (resolved.ts − opened.ts). */
