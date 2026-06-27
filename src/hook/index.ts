@@ -31,6 +31,10 @@ interface HookEvent {
 const ENGINE_HOST = process.env.AG_ENGINE_HOST ?? '127.0.0.1';
 const ENGINE_PORT = Number(process.env.AG_ENGINE_PORT ?? 9000);
 const FAIL_OPEN = process.env.AG_FAIL_OPEN === '1';
+// HITL surface (D34): 'ask' (default) defers the verdict to Claude Code's own inline permission prompt
+// — the human sees an allow/deny right in the conversation. 'hold' keeps the legacy synchronous hold,
+// where approval comes out-of-band via the dashboard or `agentguard approve/deny`.
+const HITL_PROMPT = process.env.AG_HITL_MODE !== 'hold';
 
 // M4-C terminal notifications. The hook runs in the agent's terminal, so its alerts reach the human
 // watching the agent. Gated by AG_NOTIFY (default on) and AG_APPROVAL_SURFACE (terminal|dashboard|both).
@@ -62,7 +66,7 @@ function sessionLink(sessionId?: string): string {
   return sessionId ? `  ·  http://${ENGINE_HOST}:${ENGINE_PORT}/?session=${encodeURIComponent(sessionId)}` : '';
 }
 
-function emitPre(decision: 'allow' | 'deny', reason: string): never {
+function emitPre(decision: 'allow' | 'deny' | 'ask', reason: string): never {
   process.stdout.write(
     JSON.stringify({
       hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: decision, permissionDecisionReason: reason },
@@ -124,6 +128,7 @@ async function handlePre(event: HookEvent): Promise<never> {
     input: event.tool_input ?? {},
     sessionId: event.session_id,
     cwd: event.cwd,
+    canPrompt: HITL_PROMPT, // ⇒ engine returns ASK (inline prompt) for HITL instead of holding
   };
 
   // If /intercept is slow to answer, the call is being HELD — tell the human so the agent isn't just
@@ -143,8 +148,9 @@ async function handlePre(event: HookEvent): Promise<never> {
     } else if (result.action === 'BLOCK') {
       // an immediate auto-block (the headline alert)
       notify(`⛔ AgentGuard BLOCKED ${call.tool} · ${result.reason}${sessionLink(result.sessionId ?? call.sessionId)}`);
-    } // auto ALLOW / AUDIT → silent in the terminal (D36)
-    emitPre(result.action === 'ALLOW' ? 'allow' : 'deny', result.reason);
+    } // auto ALLOW / AUDIT, and ASK (Claude Code renders its own prompt) → silent in the terminal (D36)
+    // ASK ⇒ defer to Claude Code's native permission prompt; ALLOW ⇒ allow; everything else ⇒ deny.
+    emitPre(result.action === 'ASK' ? 'ask' : result.action === 'ALLOW' ? 'allow' : 'deny', result.reason);
   } catch (err) {
     clearTimeout(heldTimer);
     const why = `AgentGuard engine unreachable at ${ENGINE_HOST}:${ENGINE_PORT} (${(err as Error).message}).`;

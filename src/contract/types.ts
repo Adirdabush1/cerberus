@@ -54,6 +54,13 @@ export interface MCPToolCall {
   input: Record<string, unknown>;
   sessionId?: string;
   cwd?: string;
+  /**
+   * The caller can render an inline permission prompt (Claude Code's native `ask`), so a HITL
+   * verdict should be returned IMMEDIATELY as `action:'ASK'` instead of holding the socket for an
+   * out-of-band approval. The real hook sets this; raw callers (e2e, dashboard-driven flows) omit it
+   * and get the synchronous hold. Default: undefined ⇒ hold.
+   */
+  canPrompt?: boolean;
 }
 
 /** Output of the policy engine for one call (pre-HITL resolution). */
@@ -103,9 +110,23 @@ export interface SessionEvent {
   source?: string; // SessionStart `source` (startup | resume | clear), if provided
 }
 
-/** The final, binary verdict returned to the hook (and thus to the agent). */
-export interface PipelineResult {
+/**
+ * The verdict a held call resolves to (PendingStore → Engine). Always binary: ASK is decided inline by
+ * the agent's host and never enters the hold path, so the store only ever yields ALLOW or BLOCK.
+ */
+export interface HeldVerdict {
   action: FinalAction;
+  reason: string;
+  violationId: string;
+}
+
+/**
+ * The verdict returned to the hook (and thus to the agent). Normally binary (ALLOW/BLOCK), but when
+ * the hook advertised `canPrompt`, a HITL verdict comes back as `ASK` — deferring the allow/deny to
+ * Claude Code's own native permission prompt instead of the engine's synchronous hold.
+ */
+export interface PipelineResult {
+  action: FinalAction | 'ASK';
   reason: string;
   violationId?: string;
   band?: RiskBand; //   severity for the hook's terminal notification (M4-C); absent ⇒ treat as ALLOW

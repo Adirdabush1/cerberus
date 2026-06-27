@@ -11,11 +11,11 @@
  * In every path the entry (and its timer) is removed, so nothing leaks.
  */
 import { EventEmitter } from 'node:events';
-import type { FinalAction, PipelineResult, SecurityViolation } from '../contract/types.js';
+import type { FinalAction, HeldVerdict, SecurityViolation } from '../contract/types.js';
 
 export interface IPendingStore {
   /** Hold a request until a human acts, the TTL fires, or the client disconnects. */
-  registerContext(violation: SecurityViolation, ttlMs: number): Promise<PipelineResult>;
+  registerContext(violation: SecurityViolation, ttlMs: number): Promise<HeldVerdict>;
   /** Release a held request with a human decision. No-op if already resolved. */
   resolveContext(violationId: string, action: FinalAction): Promise<void>;
   /** Discard a held request because the client went away. No-op if already resolved. */
@@ -26,7 +26,7 @@ export interface IPendingStore {
 
 interface Entry {
   violation: SecurityViolation;
-  resolve: (result: PipelineResult) => void;
+  resolve: (result: HeldVerdict) => void;
   timer: NodeJS.Timeout;
 }
 
@@ -38,8 +38,8 @@ interface Entry {
 export class InMemoryPendingStore extends EventEmitter implements IPendingStore {
   private readonly entries = new Map<string, Entry>();
 
-  registerContext(violation: SecurityViolation, ttlMs: number): Promise<PipelineResult> {
-    return new Promise<PipelineResult>((resolve) => {
+  registerContext(violation: SecurityViolation, ttlMs: number): Promise<HeldVerdict> {
+    return new Promise<HeldVerdict>((resolve) => {
       const timer = setTimeout(() => {
         if (!this.entries.delete(violation.id)) return;
         this.emit('resolved', violation.id, 'BLOCK' satisfies FinalAction);

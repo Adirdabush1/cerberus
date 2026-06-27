@@ -201,6 +201,16 @@ export class Engine {
       return json(res, 200, { action, reason, band: risk.band, sessionId: call.sessionId });
     }
 
+    // HITL with an interactive caller (D34-inline): defer the allow/deny to Claude Code's own native
+    // permission prompt instead of holding the socket. We record the review request (hitl-opened) for
+    // the timeline, but there is no out-of-band verdict to wait for — the agent's host resolves it, and
+    // PostToolUse will report whether the tool actually ran. NB: not added to the pending store, so it
+    // never shows up in `/pending` or the dashboard's approval queue.
+    if (call.canPrompt) {
+      this.writeAudit({ ...base, event: 'hitl-opened', reason: `${reason} (deferred to inline prompt)` });
+      return json(res, 200, { action: 'ASK', reason, band: risk.band, sessionId: call.sessionId, violationId: requestId });
+    }
+
     // HITL: build a violation, hold the socket, and wait for a verdict.
     const violation: SecurityViolation = {
       id: requestId,
