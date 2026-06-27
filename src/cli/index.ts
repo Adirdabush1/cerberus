@@ -122,13 +122,18 @@ async function main(): Promise<void> {
   if (cmd === 'approve') return runDecision('ALLOW', process.argv[3]);
   if (cmd === 'deny') return runDecision('BLOCK', process.argv[3]);
   if (cmd === 'pending') return runPending();
+  if (cmd === 'rules' && process.argv[3] === 'validate') {
+    const { runValidate } = await import('./validate.js');
+    return runValidate(process.argv.slice(4));
+  }
   process.stderr.write(
     'usage: cerberus <command>\n\n' +
       '  init [--agent claude|codex|cursor|cline] [--global] [--print]   wire the hooks into the agent\n' +
       '  engine                      start the gateway (HTTP hold + WS) and serve the dashboard\n' +
       '  hook                        the Claude Code hook entry (spawned per tool call)\n' +
       '  pending                     list calls held for review (with their ids)\n' +
-      '  approve <id> | deny <id>    resolve a held call from the terminal\n',
+      '  approve <id> | deny <id>    resolve a held call from the terminal\n' +
+      '  rules validate [--file <path>]  lint rule YAML files before engine load\n',
   );
   process.exit(1);
 }
