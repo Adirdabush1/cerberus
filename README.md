@@ -4,6 +4,8 @@
 [![license](https://img.shields.io/npm/l/@cerberussec/core.svg)](./LICENSE)
 [![node](https://img.shields.io/node/v/@cerberussec/core.svg)](https://nodejs.org)
 
+![Cerberus intercepting an agent's tool calls in real time — allow, block, and hold-for-approval](cerberus-demo.gif)
+
 A **local-first security gateway for autonomous AI coding agents.** Cerberus sits between the agent
 (Claude Code, Codex, Cursor, Cline) and your machine, intercepts **every tool call** before it runs,
 risk-scores it across four signals, and either **allows, audits, asks for human approval, or blocks**
