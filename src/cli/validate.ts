@@ -6,7 +6,7 @@
  *   - Top-level shape: { default, rules[] } (both required)
  *   - `default` is one of ALLOW | HITL | BLOCK
  *   - Every rule has id (unique), description, action (valid), when (present)
- *   - All regex patterns inside `matches` ops compile without error
+ *   - All regex patterns (and optional flags) inside `matches` ops compile without error
  *
  * Exit codes: 0 = valid, 1 = validation errors found, 2 = usage / file error
  */
@@ -22,7 +22,12 @@ interface Problem {
   message: string;
 }
 
-function collectRegexPatterns(node: unknown, patterns: string[]): void {
+interface RegexArg {
+  pattern: string;
+  flags: string;
+}
+
+function collectRegexPatterns(node: unknown, patterns: RegexArg[]): void {
   if (node === null || typeof node !== 'object') return;
   if (Array.isArray(node)) {
     for (const item of node) collectRegexPatterns(item, patterns);
@@ -32,7 +37,7 @@ function collectRegexPatterns(node: unknown, patterns: string[]): void {
   if ('matches' in obj) {
     const args = obj['matches'];
     if (Array.isArray(args) && typeof args[0] === 'string') {
-      patterns.push(args[0]);
+      patterns.push({ pattern: args[0], flags: typeof args[2] === 'string' ? args[2] : '' });
     }
   }
   for (const val of Object.values(obj)) collectRegexPatterns(val, patterns);
@@ -117,13 +122,13 @@ function validateFile(filePath: string): Problem[] {
       problems.push({ message: `${prefix} (${id ?? '?'}): missing "when" expression.` });
     } else {
       // Validate regex patterns inside `matches` ops
-      const patterns: string[] = [];
+      const patterns: RegexArg[] = [];
       collectRegexPatterns(rule['when'], patterns);
-      for (const pattern of patterns) {
+      for (const { pattern, flags } of patterns) {
         try {
-          new RegExp(pattern);
+          new RegExp(pattern, flags);
         } catch {
-          problems.push({ message: `${prefix} (${id ?? '?'}): invalid regex in "matches": /${pattern}/` });
+          problems.push({ message: `${prefix} (${id ?? '?'}): invalid regex in "matches": /${pattern}/${flags}` });
         }
       }
     }

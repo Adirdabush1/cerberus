@@ -95,9 +95,10 @@ const SECRET_PATTERNS: ReadonlyArray<{ type: string; re: RegExp; confidence: num
   },
 ];
 
-// Paths that, when read, are an early warning the session may be loading secrets.
+// Paths that, when read, are an early warning the session may be loading secrets. Either separator,
+// so Windows paths (`C:\app\.env`) count too.
 const SENSITIVE_PATH =
-  /(^|\/)(\.env(\.[^/]*)?|\.aws|\.ssh|id_rsa|id_ed25519|[^/]*\.pem|credentials|secrets?\.(?:ya?ml|json|txt))(\/|$)/i;
+  /(^|[/\\])(\.env(\.[^/\\]*)?|\.aws|\.ssh|id_rsa|id_ed25519|[^/\\]*\.pem|credentials|secrets?\.(?:ya?ml|json|txt))([/\\]|$)/i;
 
 export class InMemoryContaminationMonitor implements ContaminationMonitor {
   private readonly sessions = new Map<string, SessionState>();

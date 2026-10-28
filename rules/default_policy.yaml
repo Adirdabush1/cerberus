@@ -3,9 +3,14 @@
 # This is DATA, not code. Edit it freely; no rebuild required.
 # Rules are evaluated top-to-bottom and the FIRST match wins.
 # Each rule's `when` is a json-logic expression evaluated against a fact:
-#   { tool, category, command, path, url }
+#   { tool, category, command, path, glob, url }
 # A custom `matches` op runs a regex: { matches: ["<regex>", { var: command }] }
+#   An optional third argument holds RegExp flags: { matches: ["<regex>", { var: path }, "i"] }
 # Actions: ALLOW | BLOCK | HITL
+#
+# An ALLOW on a shell command is re-checked per command: `ls && rm -r src` is allowed only if every
+# part of the line is. Lines with substitution ($(…), backticks), grouping / script blocks ((…), {…})
+# or output redirection into a file are never auto-allowed.
 #
 # `default` applies when no rule matches. We fail toward human review (HITL),
 # never toward silent ALLOW.
@@ -43,17 +48,24 @@ rules:
     when:
       matches: ["(Invoke-WebRequest|iwr|Invoke-RestMethod|irm|DownloadString)\\b[^|;]*\\|\\s*(Invoke-Expression|iex)\\b|\\b(Invoke-Expression|iex)\\b[^|;]*\\(\\s*(Invoke-WebRequest|iwr|Invoke-RestMethod|irm|New-Object\\s+Net\\.WebClient)", { var: command }]
 
-  - id: block-env-read-path
-    description: "Reading a .env file is blocked (secret exfiltration risk)."
+  # .env holds live secrets: reading it leaks them, writing it can swap credentials or endpoints.
+  # Both separators (Windows paths) and any case (NTFS is case-insensitive) are matched, and so is any
+  # non-word suffix: `.env.local`, plus the Windows aliases `.env.` / `.env ` / `.env::$DATA`.
+  - id: block-env-path
+    description: "Reading or writing a .env file is blocked (secret exfiltration / tampering risk)."
     action: BLOCK
     when:
-      matches: ["(^|/)\\.env(\\.[^/]*)?$", { var: path }]
+      or:
+        - matches: ["(^|[/\\\\])\\.env(?!\\w)[^/\\\\]*$", { var: path }, "i"]
+        - matches: ["(^|\\W)\\.env(?!\\w)", { var: glob }, "i"]
 
-  - id: block-env-read-cmd
-    description: "Reading a .env file via the shell is blocked."
+  # Any reference, not a list of readers: grep, sed -i, cp, Select-String, node -e … all reach the
+  # file. `\W` before the dot keeps `process.env` / `import.meta.env` / `$env:PATH` out of scope.
+  - id: block-env-cmd
+    description: "A shell command that references a .env file (read, write, copy, search) is blocked."
     action: BLOCK
     when:
-      matches: ["\\b(cat|less|more|head|tail|xxd|od|Get-Content|gc|type)\\b[^&|;]*\\.env\\b", { var: command }]
+      matches: ["(^|\\W)\\.env(?!\\w)", { var: command }, "i"]
 
   # ───────────────────────── HITL: state changers ─────────────────────────
   - id: hitl-git-push

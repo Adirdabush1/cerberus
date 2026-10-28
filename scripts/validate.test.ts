@@ -101,6 +101,21 @@ const r4 = run(badRegex);
 check('bad regex exits 1', r4.code === 1, `got exit code ${r4.code}`);
 check('bad regex reports invalid regex', r4.out.includes('invalid regex'), r4.out);
 
+// ─── bad regex flags (optional 3rd `matches` arg) ────────────────────────────
+const badFlags = writeYaml('badflags.yaml', `
+default: HITL
+rules:
+  - id: bad-flags
+    description: "Has invalid RegExp flags"
+    action: BLOCK
+    when:
+      matches: ["\\\\.env", { var: path }, "iq"]
+`);
+
+const r5 = run(badFlags);
+check('bad regex flags exit 1', r5.code === 1, `got exit code ${r5.code}`);
+check('bad regex flags reported', r5.out.includes('invalid regex'), r5.out);
+
 // ─── bundled rules pass ───────────────────────────────────────────────────────
 // (only run if file exists — skipped in CI that doesn't have full project)
 try {

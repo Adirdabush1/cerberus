@@ -48,6 +48,13 @@ const egress = (sid: string): MCPToolCall => ({ tool: 'WebFetch', input: { url: 
   check('path-only session → egress not HITL', mon.evaluate(egress('p')).action === null);
 }
 
+// ── path-risk recognises Windows paths (backslash separator) ──
+{
+  const mon = new InMemoryContaminationMonitor(cfg);
+  mon.evaluate({ tool: 'Read', input: { file_path: 'C:\\app\\backend\\.env' }, sessionId: 'w' });
+  check('Windows .env path → path-risk recorded', mon.evaluate(egress('w')).kind === 'path-risk');
+}
+
 // ── taint does not bleed across sessions ──
 {
   const mon = new InMemoryContaminationMonitor(cfg);
